@@ -20,8 +20,7 @@ class MyDataset(Dataset):
     def __init__(self, dev=False, segfiles=None, replace=None, max_len=2000, augment=False):
         if segfiles is None:
             segfiles = "data/*.train.seg.aligned"
-            #segfiles = "/project/OML/chuber/2022/NMTGMinor/exp/ASR-NW/data/orig_en_cased/cv.train.seg.aligned"
-            #segfiles = "/project/OML/chuber/2022/NMTGMinor/exp/ASR-NW/data/orig_en_cased/*.train.seg.aligned"
+            #segfiles = "../WhisperE+Phi2/data/cv.DE.*.seg.aligned"
 
         if dev:
             segfiles = segfiles.replace("train","dev")
@@ -81,92 +80,52 @@ class MyDataset(Dataset):
             audio, sr = sf.read(self.audio_paths[idx])
             #audio, sr = librosa.load(self.audio_paths[idx])
         #sample = {"audio":audio[0].numpy(),"labels":self.labels[idx]}
-        sample = {"input_values":audio,"labels":self.labels[idx], "id":self.ids[idx]}
+        sample = {"audio":audio,"labels":self.labels[idx], "id":self.ids[idx]}
         return sample
 
 @dataclass
-class DataCollatorCTCWithPadding:
-    """
-    Data collator that will dynamically pad the inputs received.
-    Args:
-        processor (:class:`~transformers.Wav2Vec2Processor`)
-            The processor used for proccessing the data.
-        padding (:obj:`bool`, :obj:`str` or :class:`~transformers.tokenization_utils_base.PaddingStrategy`, `optional`, defaults to :obj:`True`):
-            Select a strategy to pad the returned sequences (according to the model's padding side and padding index)
-            among:
-            * :obj:`True` or :obj:`'longest'`: Pad to the longest sequence in the batch (or no padding if only a single
-              sequence if provided).
-            * :obj:`'max_length'`: Pad to a maximum length specified with the argument :obj:`max_length` or to the
-              maximum acceptable input length for the model if that argument is not provided.
-            * :obj:`False` or :obj:`'do_not_pad'` (default): No padding (i.e., can output a batch with sequences of
-              different lengths).
-        max_length (:obj:`int`, `optional`):
-            Maximum length of the ``input_values`` of the returned list and optionally padding length (see above).
-        max_length_labels (:obj:`int`, `optional`):
-            Maximum length of the ``labels`` returned list and optionally padding length (see above).
-        pad_to_multiple_of (:obj:`int`, `optional`):
-            If set will pad the sequence to a multiple of the provided value.
-            This is especially useful to enable the use of Tensor Cores on NVIDIA hardware with compute capability >=
-            7.5 (Volta).
-    """
+class DataCollatorSpeechSeq2SeqWithPadding:
+    processor: Any
+    tokenizer: Any
+    return_ids: bool = False
 
-    processor: Wav2Vec2Processor
-    padding: Union[bool, str] = True
-    max_length: Optional[int] = None
-    max_length_labels: Optional[int] = None
-    pad_to_multiple_of: Optional[int] = None
-    pad_to_multiple_of_labels: Optional[int] = None
+    def __call__(self, features: List[Dict[str, Union[List[int], torch.Tensor]]],                 inference=False) -> Dict[str, torch.Tensor]:
 
-    def __call__(self, features: List[Dict[str, Union[List[int], torch.Tensor]]]) -> Dict[str, torch.Tensor]:
-        # split inputs and labels since they have to be of different lengths and need
-        # different padding methods
-        input_features = [{"input_values": feature["input_values"]} for feature in features]
+        audio = torch.cat([self.processor(item["audio"], sampling_rate=16000,                     return_tensors="pt").input_features for item in features], dim=0)
+        text_labels = self.tokenizer([feature["labels"] for feature in features], return_tensors="pt", padding=True)
 
-        label_features = [{"input_ids": self.processor.tokenizer(feature["labels"])["input_ids"]} for feature in features]
+        input_ids = text_labels["input_ids"][:,:-1]
 
-        batch = self.processor.pad(
-            input_features,
-            padding=self.padding,
-            max_length=self.max_length,
-            pad_to_multiple_of=self.pad_to_multiple_of,
-            return_tensors="pt",
-            return_attention_mask=True,
-        )
+        mask = text_labels["attention_mask"][:,1:]
+        labels = text_labels["input_ids"][:,1:].clone()
+        labels[mask.eq(0)] = -100
 
-        with self.processor.as_target_processor():
-            labels_batch = self.processor.pad(
-                label_features,
-                padding=self.padding,
-                max_length=self.max_length_labels,
-                pad_to_multiple_of=self.pad_to_multiple_of_labels,
-                return_tensors="pt",
-            )
-
-        # replace padding with -100 to ignore loss correctly
-        labels = labels_batch["input_ids"].masked_fill(labels_batch.attention_mask.ne(1), -100)
-
-        batch["labels"] = labels
+        batch = {"input_features": audio, "decoder_input_ids":input_ids, "labels":labels}
+        if self.return_ids:
+            batch["ids"] = [item["id"] for item in features]
 
         return batch
 
-wer_metric = load_metric("wer")
-
 def compute_metrics(pred):
-    pred_logits = pred.predictions
-    pred_ids = np.argmax(pred_logits, axis=-1)
+    print(pred)
+    breakpoint()
+    return {}
 
-    pred.label_ids[pred.label_ids == -100] = processor.tokenizer.pad_token_id
-
-    pred_str = processor.batch_decode(pred_ids)
-    # we do not want to group tokens when computing the metrics
-    label_str = processor.batch_decode(pred.label_ids, group_tokens=False)
-
-    wer = wer_metric.compute(predictions=pred_str, references=label_str)
-
-    return {"wer": wer}
-
+    breakpoint()
     loss = pred.loss
     ppl = math.exp(loss.sum()/loss.shape[0])
+    return {"ppl": ppl}
 
-    return {"ppl": ppl, "wer": wer}
+    pred_ids = pred.predictions
+    label_ids = pred.label_ids
 
+    # replace -100 with the pad_token_id
+    label_ids[label_ids == -100] = processor.tokenizer.pad_token_id
+
+    # we do not want to group tokens when computing the metrics
+    pred_str = processor.tokenizer.batch_decode(pred_ids, skip_special_tokens=True)
+    label_str = processor.tokenizer.batch_decode(label_ids, skip_special_tokens=True)
+
+    wer = 100 * metric.compute(predictions=pred_str, references=label_str)
+
+    return {"ppl":ppl, "wer": wer}
