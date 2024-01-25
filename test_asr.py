@@ -18,7 +18,7 @@ segfile = sys.argv[2] if len(sys.argv) > 2 else "data/*.test.seg.aligned"
 
 print("Using path",path)
 
-model = WhisperForConditionalGeneration.from_pretrained(path, torch_dtype="auto", device_map="cuda")
+model = WhisperForConditionalGeneration.from_pretrained(path, torch_dtype=torch.float32, device_map="cuda")
 
 #dataset = MyDataset(segfiles=segfile, dev=True) # Only decode first part of testset
 dataset = MyDataset(segfiles=segfile) # Decode whole testset
