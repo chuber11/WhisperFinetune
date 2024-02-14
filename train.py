@@ -60,11 +60,13 @@ dataset["test"] = MyDataset(dev=True, augment=augment)
 print(len(dataset["train"]))
 print(len(dataset["test"]))
 
-model_name = "openai/whisper-large-v3"
+#model_name = "openai/whisper-large-v3"
 #model_name = "openai/whisper-medium"
+model_name = "openai/whisper-large-v2"
 
 tokenizer = WhisperTokenizerFast.from_pretrained(model_name)
-tokenizer.set_prefix_tokens(language="german", task="transcribe")
+#tokenizer.set_prefix_tokens(language="german", task="transcribe")
+tokenizer.set_prefix_tokens(task="transcribe")
 processor = WhisperProcessor.from_pretrained(model_name)
 
 data_collator = DataCollatorSpeechSeq2SeqWithPadding(processor=processor, tokenizer=tokenizer)
@@ -81,7 +83,7 @@ resume = len(checkpoint) > 0
 load = None
 
 if not resume and load is None:
-    model = WhisperForConditionalGeneration.from_pretrained(model_name, torch_dtype=torch.float32, device_map="cuda")
+    model = WhisperForConditionalGeneration.from_pretrained(model_name, torch_dtype="auto", device_map="cuda")
 else:
     if resume:
         model = WhisperForConditionalGeneration.from_pretrained(checkpoint[0], torch_dtype="auto", device_map="cuda")
@@ -92,7 +94,7 @@ else:
 
 print(f"Number of parameters: {sum(p.numel() for p in model.parameters())/1000000:.0f} M, number of trainable parameters: {sum(p.numel() for p in model.parameters() if p.requires_grad)/1000000:.0f} M")
 
-eval_steps = 45
+eval_steps = 100
 
 training_args = Seq2SeqTrainingArguments(
     output_dir=output_dir,
@@ -101,7 +103,7 @@ training_args = Seq2SeqTrainingArguments(
     learning_rate=1e-5, #8e-4,
     lr_scheduler_type="constant_with_warmup",
     warmup_steps=500,
-    max_steps=1000,
+    max_steps=100000,
     gradient_checkpointing=True,
     fp16=True,
     evaluation_strategy="steps",

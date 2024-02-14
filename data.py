@@ -19,8 +19,8 @@ import random
 class MyDataset(Dataset):
     def __init__(self, dev=False, segfiles=None, replace=None, max_len=2000, augment=False):
         if segfiles is None:
-            segfiles = "data/*.train.seg.aligned"
-            #segfiles = "../WhisperE+Phi2/data/cv.DE.*.seg.aligned"
+            #segfiles = "data/*.train.seg.aligned"
+            segfiles = "../WhisperE+Phi2/data/cv.*.*.seg.aligned"
 
         if dev:
             segfiles = segfiles.replace("train","dev")
@@ -51,7 +51,10 @@ class MyDataset(Dataset):
                     self.timestamps.append((float(line[2]),float(line[3])))
                 else:
                     raise RuntimeError
-                self.labels.append(line2.strip())
+                lang = "<|en|>"
+                if "DE" in segfile:
+                    lang = "<|de|>"
+                self.labels.append(lang+line2.strip())
 
                 #if len(self.audio_paths) >= 16*3:
                 #    break
@@ -93,6 +96,13 @@ class DataCollatorSpeechSeq2SeqWithPadding:
 
         audio = torch.cat([self.processor(item["audio"], sampling_rate=16000,                     return_tensors="pt").input_features for item in features], dim=0)
         text_labels = self.tokenizer([feature["labels"] for feature in features], return_tensors="pt", padding=True)
+
+        text_labels["input_ids"] = torch.cat([
+            text_labels["input_ids"][:,:1],
+            text_labels["input_ids"][:,3:4],
+            text_labels["input_ids"][:,1:3],
+            text_labels["input_ids"][:,4:]
+            ],1)
 
         input_ids = text_labels["input_ids"][:,:-1]
 
