@@ -20,7 +20,7 @@ class MyDataset(Dataset):
     def __init__(self, dev=False, segfiles=None, replace=None, max_len=2000, augment=False):
         if segfiles is None:
             #segfiles = "data/*.train.seg.aligned"
-            segfiles = "../WhisperE+Phi2/data/cv.*.*.seg.aligned"
+            segfiles = "../WhisperE+Phi2/data/cv.*.train.seg.aligned"
 
         if dev:
             segfiles = segfiles.replace("train","dev")
