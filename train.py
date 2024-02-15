@@ -1,5 +1,6 @@
 
 from data import MyDataset, DataCollatorSpeechSeq2SeqWithPadding, compute_metrics
+from model import WhisperForConditionalGenerationMemory
 
 from transformers import WhisperTokenizerFast
 from transformers import WhisperForConditionalGeneration, WhisperProcessor
@@ -18,32 +19,41 @@ class MySeq2SeqTrainer(Seq2SeqTrainer):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         
-        self.statistics = [0.0,0.0]
-
-    #def evaluate(self, *args, **kwargs):
-    #    kwargs["max_length"] = max_length
-    #    kwargs["no_repeat_ngram_size"] = 6
-    #    kwargs["forced_decoder_ids"] = processor.get_decoder_prompt_ids(language="en", task="transcribe")
-
-    #    return super().evaluate(*args, **kwargs)
+        self.statistics = [0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0]
 
     def compute_loss(self, model, inputs, return_outputs=False):
         res = super().compute_loss(model, inputs, return_outputs=True)
 
-        if model.training:
-            self.statistics[0] += res[0].detach()
-            self.statistics[1] += 1
+        self.statistics[0] += res[1].loss_ntp.detach().item()
+        self.statistics[1] += 1
+        self.statistics[2] += res[1].loss_memory_total.detach().item()
+        self.statistics[3] += res[1].anz_layers.item()
+        self.statistics[4] += res[1].loss_memory_mem.detach().item()
+        self.statistics[5] += res[1].anz_mem.item()
+        self.statistics[6] += res[1].acc_mem.item()
+        self.statistics[7] += res[1].acc_nomem.item()
+        self.statistics[8] += res[1].anz_total.item()
 
         if return_outputs:
             return res
         else:
             return res[0]
 
+    def compute_mymetrics(self):
+        logs = {}
+        if self.statistics[1] > 0:
+            logs["loss_ntp"] = self.statistics[0]/self.statistics[1]
+            logs["ppl_ntp"] = math.exp(self.statistics[0]/self.statistics[1])
+            logs["loss_memory_total"] = self.statistics[2]/self.statistics[3]
+            logs["ppl_memory_total"] = math.exp(self.statistics[2]/self.statistics[3])
+            logs["acc_memory_nomem"] = self.statistics[7]/(self.statistics[8]-self.statistics[5])
+            logs["ppl_memory_mem"] = math.exp(self.statistics[4]/self.statistics[5])
+            logs["acc_memory_mem"] = self.statistics[6]/self.statistics[5]
+            self.statistics = [0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0]
+        return logs
+
     def log(self, logs):
-        if not "eval_ppl" in logs:
-            if self.statistics[1] > 0:
-                logs["ppl"] = math.exp(self.statistics[0].item()/self.statistics[1])
-                self.statistics = [0.0,0.0]
+        logs.update(self.compute_mymetrics())
         super().log(logs)
 
 class MyCallback(TrainerCallback):
@@ -52,10 +62,12 @@ class MyCallback(TrainerCallback):
             pass #control.should_evaluate = True
 
 augment = False
+memory = True
 
 dataset = {} #DatasetDict()
-dataset["train"] = MyDataset(augment=augment)
-dataset["test"] = MyDataset(dev=True, augment=augment)
+dataset["train"] = MyDataset(augment=augment, memory=memory)
+#dataset["train"][0]
+dataset["test"] = MyDataset(dev=True, augment=augment, memory=memory)
 
 print(len(dataset["train"]))
 print(len(dataset["test"]))
@@ -71,6 +83,8 @@ processor = WhisperProcessor.from_pretrained(model_name)
 
 data_collator = DataCollatorSpeechSeq2SeqWithPadding(processor=processor, tokenizer=tokenizer)
 
+#data_collator([dataset["train"][i] for i in range(32)])
+
 if len(sys.argv)<=1:
     print("You have to specify a model name")
     sys.exit()
@@ -83,31 +97,31 @@ resume = len(checkpoint) > 0
 load = None
 
 if not resume and load is None:
-    model = WhisperForConditionalGeneration.from_pretrained(model_name, torch_dtype="auto", device_map="cuda")
+    model = WhisperForConditionalGenerationMemory.from_pretrained(model_name, torch_dtype="auto", device_map="cuda")
 else:
     if resume:
-        model = WhisperForConditionalGeneration.from_pretrained(checkpoint[0], torch_dtype="auto", device_map="cuda")
+        model = WhisperForConditionalGenerationMemory.from_pretrained(checkpoint[0], torch_dtype="auto", device_map="cuda")
         print("Resuming training with",checkpoint[0])
     else:
-        model = WhisperForConditionalGeneration.from_pretrained(load, torch_dtype="auto", device_map="cuda")
+        model = WhisperForConditionalGenerationMemory.from_pretrained(load, torch_dtype="auto", device_map="cuda")
         print("Loading checkpoint from",load)
 
 print(f"Number of parameters: {sum(p.numel() for p in model.parameters())/1000000:.0f} M, number of trainable parameters: {sum(p.numel() for p in model.parameters() if p.requires_grad)/1000000:.0f} M")
 
-eval_steps = 100
+eval_steps = 1000
 
 training_args = Seq2SeqTrainingArguments(
     output_dir=output_dir,
-    per_device_train_batch_size=32,
-    gradient_accumulation_steps=1,  # increase by 2x for every 2x decrease in batch size
-    learning_rate=1e-5, #8e-4,
+    per_device_train_batch_size=16,
+    gradient_accumulation_steps=2,  # increase by 2x for every 2x decrease in batch size
+    learning_rate=1e-4, #8e-4,
     lr_scheduler_type="constant_with_warmup",
     warmup_steps=500,
     max_steps=100000,
-    gradient_checkpointing=True,
+    gradient_checkpointing=False,
     fp16=True,
     evaluation_strategy="steps",
-    per_device_eval_batch_size=16,
+    per_device_eval_batch_size=32,
     predict_with_generate=False,#True,
     save_steps=eval_steps,
     eval_steps=eval_steps,
@@ -119,7 +133,7 @@ training_args = Seq2SeqTrainingArguments(
     greater_is_better=False,
     push_to_hub=False,
     remove_unused_columns=False,
-    dataloader_num_workers=4,
+    dataloader_num_workers=8,
 )
 
 trainer = MySeq2SeqTrainer(
