@@ -28,17 +28,7 @@ def replace_except_specified_chars(text):
     return result
 
 class MyDataset(Dataset):
-    def __init__(self, dev=False, segfiles=None, replace=None, max_len=2000, augment=False, memory=False):
-        if segfiles is None:
-            #segfiles = "data/*.train.seg.aligned"
-            segfiles = "../WhisperE+Phi2/data/cv.*.train.seg.aligned"
-
-        if dev:
-            segfiles = segfiles.replace("train","dev")
-
-        if augment:
-            segfiles = segfiles.replace("data","data_augment")
-
+    def __init__(self, segfiles, dev=False, replace=None, max_len=2000, memory=False):
         if replace is None:
             replace = [("/project/asr_systems/LT2021/EN/data","/export/data2/chuber/ASR/data/EN")]
 
@@ -129,6 +119,58 @@ class MyDataset(Dataset):
             sample["memory_word_dummys"] = random.sample(self.new_words,4)
 
         return sample
+
+class ConcatDataset(Dataset):
+    def __init__(self, datasets, factors=None):
+        self.dataset = datasets
+        self.factors = factors is not None
+
+        self.cumulative_lengths = self._compute_cumulative_lengths(datasets, factors)
+
+        self.order = random.sample(range(self.len), self.len)
+
+    def _compute_cumulative_lengths(self, datasets, factors):
+        cumulative_lengths = []
+        total_length = 0
+
+        if len(datasets) == 0:
+            raise RuntimeError("At least one dataset has to be provided!")
+
+        if factors is None:
+            for dataset in datasets:
+                total_length += len(dataset)
+                cumulative_lengths.append(total_length)
+        else:
+            print("Dataset weighting factors:",factors)
+
+            for dataset, factor in zip(datasets,factors):
+                total_length += factor*len(dataset)
+                cumulative_lengths.append(total_length)
+
+        return cumulative_lengths
+
+    def __len__(self):
+        return self.cumulative_lengths[-1]
+
+    def __getitem__(self, idx):
+        if idx < 0 or idx >= len(self):
+            raise IndexError("Index out of range")
+
+        idx = self.order[idx]
+
+        # Determine which dataset the index falls into and the index within that dataset
+        dataset_index = next(i for i, cumulative_length in enumerate(self.cumulative_lengths) if idx < cumulative_length)
+        if dataset_index == 0:
+            index_within_dataset = idx
+        else:
+            index_within_dataset = idx - self.cumulative_lengths[dataset_index - 1]
+
+        dataset = self.datasets[dataset_index]
+
+        if self.factors:
+            index_within_dataset %= len(dataset)
+
+        return dataset[index_within_dataset]
 
 @dataclass
 class DataCollatorSpeechSeq2SeqWithPadding:

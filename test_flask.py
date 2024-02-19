@@ -24,7 +24,7 @@ for line in open(segfile):
 
     wav_ = wav[int(32000*start):int(32000*end)]
 
-    res = requests.post("http://192.168.0.72:5000/asr/infer/en,en", files={"pcm_s16le":wav_, "prefix": ""}) #, "memory":json.dumps(["<|en|>Waibel"])})
+    res = requests.post("http://192.168.0.72:5000/asr/infer/None,None", files={"pcm_s16le":wav_, "prefix": "", "memory":json.dumps(["Waibel"])})
     hypo = res.json()["hypo"]
 
     print(hypo)

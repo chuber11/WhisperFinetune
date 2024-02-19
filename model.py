@@ -347,7 +347,10 @@ class WhisperModelMemory(WhisperModel):
         for p in self.decoder.parameters():
             p.requires_grad = False
 
-        self.two_decoders = True
+        self.two_decoders = False
+
+        if not self.two_decoders:
+            print("WARNING: Should there be used two decoders?")
 
     def forward(
         self,

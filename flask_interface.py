@@ -33,7 +33,7 @@ def initialize_model():
 
     processor.get_decoder_prompt_ids(language="en", task="transcribe") # WARNING: Changes state of processor
     
-    model_path = "saves/model_newwords/checkpoint-99000"
+    model_path = "saves/model_newwords2/checkpoint-103000"
     model = WhisperForConditionalGenerationMemory.from_pretrained(model_path)
     
     print("ASR initialized")
