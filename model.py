@@ -10,7 +10,7 @@ from typing import Optional, Tuple, Union
 
 from transformers import WhisperForConditionalGeneration, WhisperConfig, WhisperModel
 from transformers.modeling_outputs import Seq2SeqLMOutput, Seq2SeqModelOutput, BaseModelOutput, BaseModelOutputWithPastAndCrossAttentions
-from transformers.models.whisper.modeling_whisper import WhisperEncoder, WhisperDecoder, WhisperDecoderLayer, WhisperPreTrainedModel, WhisperPositionalEmbedding
+from transformers.models.whisper.modeling_whisper import WhisperEncoder, WhisperDecoder, WhisperDecoderLayer, WhisperPreTrainedModel, WhisperPositionalEmbedding, WHISPER_ATTENTION_CLASSES
 from transformers.modeling_attn_mask_utils import _prepare_4d_causal_attention_mask, _prepare_4d_causal_attention_mask_for_sdpa
 
 from transformers.models.mbart.modeling_mbart import MBartForConditionalGeneration
@@ -26,8 +26,7 @@ class AttentionMemory(nn.Module):
         super().__init__()
 
         self.q = nn.Linear(d_model, d_model)
-        self.k = nn.Linear(1024, d_model)
-        self.v = nn.Linear(1024, d_model)
+        self.k = nn.Linear(d_model, d_model)
         self.temperature = np.power(d_model, -0.25)
 
     def forward(self, hidden_states, memory):
@@ -35,13 +34,9 @@ class AttentionMemory(nn.Module):
 
         q = self.temperature * self.q(hidden_states) # b x l_tgt x d_model
         k = self.temperature * self.k(memory) # (n_mem+1) x d_model
-        v = self.v(memory) # (n_mem+1) x d_model
 
         attn = torch.einsum("t b d, n d -> t b n", q, k) # b x l_tgt x (n_mem+1)
-        probs = F.softmax(attn, -1) # b x l_tgt x (n_mem+1)
-        output = torch.matmul(probs, v) # b x l_tgt x d_model
-
-        return attn, output
+        return attn
 
 @dataclass
 class BaseModelOutputWithPastAndCrossAttentionsMemory(BaseModelOutputWithPastAndCrossAttentions):
@@ -58,6 +53,43 @@ class WhisperDecoderLayerMemory(WhisperDecoderLayer):
 
         self.memory_attn = AttentionMemory(self.embed_dim)
         self.memory_layer_norm = nn.LayerNorm(self.embed_dim)
+
+        self.memory_entry_attn = WHISPER_ATTENTION_CLASSES[config._attn_implementation](
+            self.embed_dim,
+            config.decoder_attention_heads,
+            dropout=config.attention_dropout,
+            is_decoder=True,
+            config=config,
+        )
+
+    def calc_memory_entry_attn(self, dec_output, mem_attn_out, memory_text_enc, memory_text_mask):
+        b, l_tar, _ = mem_attn_out.shape
+
+        #if memory_text_enc is None:
+        #    return
+
+        mem_attn_out = mem_attn_out[:, :, :memory_text_enc.shape[1] + 1].argmax(-1).view(-1) - 1 # b*l_tar
+
+        # filter -1´s
+        mask = mem_attn_out.ne(-1)
+        if mask.any():
+            indices = torch.arange(mask.shape[0], device=mask.device)[mask]
+            mem_attn_out = mem_attn_out[mask]
+
+            dec_output = dec_output.view(b*l_tar, -1) # b*l_tar x d_model
+            hidden_states = dec_output[indices].unsqueeze(1) # mask.sum() x 1 x d_model
+
+            key_value_states = memory_text_enc[mem_attn_out] # mask.sum() x l_mem x d_model
+            attention_mask = memory_text_mask[mem_attn_out].unsqueeze(1).unsqueeze(1) # mask.sum() x 1 x 1 x l_mem
+
+            memory_entry_attn = self.memory_entry_attn(hidden_states=hidden_states, key_value_states=key_value_states, attention_mask=attention_mask)[0]
+
+            output = torch.zeros_like(dec_output, dtype=memory_entry_attn.dtype) # b*l_tar x d_model
+            output[indices] = memory_entry_attn[0]
+
+            return output.view(b, l_tar, -1) # b x l_tar x d_model
+        else:
+            return
 
     def forward(
         self,
@@ -79,14 +111,22 @@ class WhisperDecoderLayerMemory(WhisperDecoderLayer):
 
         hidden_states = self.memory_layer_norm(hidden_states)
 
-        encoder_output_memory, memory_text_enc = memory
+        encoder_output_memory, memory_text_enc, memory_text_mask = memory
 
-        cross_attn_weights, hidden_states = self.memory_attn(hidden_states, encoder_output_memory) # b x l_tgt x (n_mem+1)
+        cross_attn_weights = self.memory_attn(hidden_states, encoder_output_memory) # b x l_tgt x (n_mem+1)
         #if cross_attn_weights.argmax(-1).item() > 0:
         #    print(cross_attn_weights,encoder_output_memory.shape)
 
-        hidden_states = nn.functional.dropout(hidden_states, p=self.dropout, training=self.training)
-        hidden_states = residual + hidden_states
+        hidden_states = self.calc_memory_entry_attn(dec_output=hidden_states,
+                                                    mem_attn_out=cross_attn_weights,
+                                                    memory_text_enc=memory_text_enc,
+                                                    memory_text_mask=memory_text_mask)
+
+        if hidden_states is not None:
+            hidden_states = nn.functional.dropout(hidden_states, p=self.dropout, training=self.training)
+            hidden_states = residual + hidden_states
+        else:
+            hidden_states = residual
 
         outputs = (hidden_states, *outputs[1:], cross_attn_weights)
         return outputs
@@ -283,15 +323,17 @@ class EncoderMemory(nn.Module):
 
         model_name = "facebook/mbart-large-50"
         self.model = MBartForConditionalGeneration.from_pretrained(model_name).model.encoder
+        d_model = self.model.embed_tokens.embedding_dim
         del self.model.embed_tokens
 
-        d_model = self.model.layers[0].self_attn.k_proj.in_features
-        if d_model != 1280:
-            self.linear = nn.Linear(1280, d_model)
+        if d_model != decoder.embed_tokens.embedding_dim:
+            self.linear = nn.Linear(decoder.embed_tokens.embedding_dim, d_model)
+            self.linear2 = nn.Linear(d_model, decoder.embed_tokens.embedding_dim)
         else:
             self.linear = None
+            self.linear2 = None
 
-        self._no_entry_found = nn.Parameter(torch.randn(1,1024))
+        self._no_entry_found = nn.Parameter(torch.randn(1,decoder.embed_tokens.embedding_dim))
         self.decoder = [decoder]
 
     @property
@@ -312,14 +354,22 @@ class EncoderMemory(nn.Module):
 
         memory_text_enc = self.model(inputs_embeds=memory_text_embeds, attention_mask=memory_text_mask)[0] # n_mem x l_mem x d_model
 
+        if self.linear2 is not None:
+            memory_text_enc = self.linear2(memory_text_enc)
+
+        memory_text_mask = memory_text_mask.eq(0)
+
         #if memory_text_enc is not None:
-        memory_text_enc[memory_text_mask.eq(0)] = 0
+        memory_text_enc[memory_text_mask] = 0
+
+        memory_text_mask = memory_text_mask.to(memory_text_enc.dtype)
+        memory_text_mask[memory_text_mask.eq(1)] = -float("Inf")
 
         encoder_output_memory_wonef = 3 * memory_text_enc.sum(1) / lengths # n_mem x d_model
 
         encoder_output_memory = torch.cat([self.no_entry_found, encoder_output_memory_wonef],0) # (n_mem+1) x d_model
 
-        return encoder_output_memory, memory_text_enc
+        return encoder_output_memory, memory_text_enc, memory_text_mask
 
 @dataclass
 class Seq2SeqModelOutputMemory(Seq2SeqModelOutput):
@@ -574,7 +624,7 @@ class WhisperForConditionalGenerationMemoryWrapper(WhisperForConditionalGenerati
                 loss_memory_total = loss_memory_total + loss_memory_total_
                 anz_layers += 1
 
-            loss = loss + loss_memory_total
+            loss = loss + 1e-2 * loss_memory_total
 
             loss_memory_mem += loss_fct_mem(cross_attn_weights, memory_labels)
 

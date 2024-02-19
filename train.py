@@ -130,20 +130,24 @@ segfiles = "../WhisperE+Phi2/data/cv.*.train.seg.aligned"
 segfiles_dev = segfiles.replace("train","dev")
 
 memory = True
-early_stopping = 0
+early_stopping = 10
 
 #model_name = "openai/whisper-large-v3"
 #model_name = "openai/whisper-medium"
 model_name = "openai/whisper-large-v2"
 
-load = None # For loading one model but training with new optimizer under other name
+load = None #"saves/model_newwords/checkpoint-99000" # For loading one model but training with new optimizer under other name
 
 eval_steps = 1000 # evaluation every x updates
 
-learning_rate=1e-4
+learning_rate = 2e-4
 
-model_class = WhisperForConditionalGenerationMemory # WhisperForConditionalGeneration
-trainer_class = MySeq2SeqTrainerMemory # MySeq2SeqTrainer
+if not memory:
+    model_class = WhisperForConditionalGeneration
+    trainer_class = MySeq2SeqTrainer
+else:
+    model_class = WhisperForConditionalGenerationMemory
+    trainer_class = MySeq2SeqTrainerMemory
 
 ########## end arguments for training ############################
 
