@@ -92,14 +92,13 @@ class MyDataset(Dataset):
                 for label in tqdm(self.labels):
                     words = replace_except_specified_chars(label[len("<|en|>"):]).split()
                     for word in words:
-                        word = label[:len("<|en|>")]+word
                         occ[word] += 1
 
                 """for i in range(1,20):
                     tmp = [k for k,v in occ.items() if v==i]
                     print(i,len(tmp),tmp[:20])"""
 
-                new_words = set(k for k,v in occ.items() if v<=5)
+                new_words = set(k for k,v in occ.items() if v<=10)
 
                 torch.save(new_words, new_words_list)
 
@@ -124,7 +123,7 @@ class MyDataset(Dataset):
         if self.memory:
             label = sample["labels"]
             label_words = replace_except_specified_chars(label[len("<|en|>"):]).split()
-            memory_words = set(label[:len("<|en|>")]+word for word in label_words if label[:len("<|en|>")]+word in self.new_words)
+            memory_words = set(word for word in label_words if word in self.new_words)
 
             sample["memory_words"] = memory_words
             sample["memory_word_dummys"] = random.sample(self.new_words,4)
@@ -168,13 +167,11 @@ class DataCollatorSpeechSeq2SeqWithPadding:
             memory = self.tokenizer(memory_words, return_tensors="pt", padding=True)
             memory["input_ids"] = memory["input_ids"][:,3:]
             memory["attention_mask"] = memory["attention_mask"][:,3:]
-
+            
             memory_labels = torch.zeros_like(labels)
             index = 0
             for index2, feature in enumerate(features):
                 for word in feature["memory_words"]:
-                    lang, word = word[:len("<|en|>")], word[len("<|en|>"):]
-
                     ids = labels[index2][3:]
                     mask = ids.ne(-100)
                     ids = ids[mask][:-1]

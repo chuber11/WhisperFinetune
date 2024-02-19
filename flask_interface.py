@@ -11,7 +11,9 @@ import queue
 import uuid
 import traceback
 from transformers import WhisperForConditionalGeneration, WhisperProcessor
-from transformers.modeling_outputs import BaseModelOutput
+
+from model import BaseModelOutputMemory
+from model import WhisperForConditionalGenerationMemory
 
 host = "0.0.0.0"
 port = 5000
@@ -23,14 +25,16 @@ def create_unique_list(my_list):
     return my_list
 
 def initialize_model():
-    filename = "large-v3" # ["tiny.en","tiny","base.en","base","small.en","small","medium.en","medium","large-v1","large-v2","large"]
+    filename = "large-v2" # ["tiny.en","tiny","base.en","base","small.en","small","medium.en","medium","large-v1","large-v2","large"]
     #filename = "tiny"
     
     model_path = "openai/whisper-{}".format(filename)
     processor = WhisperProcessor.from_pretrained(model_path)
+
+    processor.get_decoder_prompt_ids(language="en", task="transcribe") # WARNING: Changes state of processor
     
-    model_path = "saves/model5/checkpoint-180"
-    model = WhisperForConditionalGeneration.from_pretrained(model_path)
+    model_path = "saves/model_newwords/checkpoint-99000"
+    model = WhisperForConditionalGenerationMemory.from_pretrained(model_path)
     
     print("ASR initialized")
 
@@ -47,11 +51,19 @@ def add_prefix_tokens(processor, prefix, forced_decoder_ids):
         for wid in prompt_ids:
             forced_decoder_ids.append((len(forced_decoder_ids) + 1, wid))
 
-def infer_batch(audio_wavs, prefix="", input_language="en", task="transcribe", audio_sample_rate=16000):
+def infer_batch(audio_wavs, prefix="", input_language="en", task="transcribe", audio_sample_rate=16000, memory_words=None):
     # get device based on the model parameters
     device = next(model.parameters()).device
         
     input_values = torch.cat([processor(item, sampling_rate=audio_sample_rate, return_tensors="pt").input_features for item in audio_wavs], dim=0).to(device)
+
+    if memory_words is not None:
+        memory = processor.tokenizer(memory_words, return_tensors="pt", padding=True)
+        memory["input_ids"] = memory["input_ids"][:,4:].to(device)
+        memory["attention_mask"] = memory["attention_mask"][:,4:].to(device)
+    else:
+        memory = None
+    #print([processor.tokenizer.decode(i) for i in memory["input_ids"][0]])
     
     if input_language != "None" and not "+" in input_language:
         forced_decoder_ids = processor.get_decoder_prompt_ids(language=input_language, task=task)
@@ -87,13 +99,14 @@ def infer_batch(audio_wavs, prefix="", input_language="en", task="transcribe", a
         outputs = {}
         for pred, indices in pred_to_indices.items():
             forced_decoder_ids[0] = (forced_decoder_ids[0][0],pred)
-            encoder_outputs = BaseModelOutput(last_hidden_state=output["encoder_hidden_states"][-1][indices])
+            encoder_outputs = BaseModelOutputMemory(last_hidden_state=output["encoder_hidden_states"][-1][indices])
 
             predicted_ids2 = model.generate(
                 input_values[indices], 
                 forced_decoder_ids=forced_decoder_ids,
                 no_repeat_ngram_size=6,
-                encoder_outputs=encoder_outputs,
+                encoder_outputs_memory=encoder_outputs,
+                memory=memory,
             )
             for o,i in zip(processor.batch_decode(predicted_ids2, skip_special_tokens=True),indices):
                 outputs[i] = o
@@ -103,8 +116,11 @@ def infer_batch(audio_wavs, prefix="", input_language="en", task="transcribe", a
     predicted_ids = model.generate(
         input_values, 
         forced_decoder_ids=forced_decoder_ids,
-        no_repeat_ngram_size=6
+        no_repeat_ngram_size=6,
+        memory=memory,
     )
+
+    #print([(processor.tokenizer.decode(i),i.item()) for i in predicted_ids[0]])
 
     text_output_raw = processor.batch_decode(predicted_ids, skip_special_tokens=True)
     return text_output_raw
@@ -113,7 +129,7 @@ def use_model(reqs):
 
     if len(reqs) == 1:
         req = reqs[0]
-        audio_tensor, prefix, input_language, output_language = req.get_data()
+        audio_tensor, prefix, input_language, output_language, memory_words = req.get_data()
         if not (input_language == output_language or output_language == 'en'):
             result = {"hypo": "", "status":400, "message": 'Wrong option. Perform X->X "transcribe" or X->English "translate". Found {} -> {}'.format(input_language, output_language)}
             req.publish(result)
@@ -124,7 +140,7 @@ def use_model(reqs):
         else:
             task = "translate"
         
-        hypo = infer_batch(audio_wavs=[audio_tensor], input_language=input_language, task=task, prefix=prefix)[0]
+        hypo = infer_batch(audio_wavs=[audio_tensor], input_language=input_language, task=task, prefix=prefix, memory_words=memory_words)[0]
             
         result = {"hypo": hypo.strip()}
         req.publish(result)
@@ -134,20 +150,23 @@ def use_model(reqs):
         prefixes = ['']
         input_languages = list()
         output_languages = list()
+        memory_wordss = list()
 
         batch_runnable = False
 
         for req in reqs:
-            audio_tensor, prefix, input_language, output_language = req.get_data()
+            audio_tensor, prefix, input_language, output_language, memory_words = req.get_data()
             audio_tensors.append(audio_tensor)
             prefixes.append(prefix)
             input_languages.append(input_language)
             output_languages.append(output_language)
+            memory_wordss.append(memory_words)
 
         unique_prefix_list = create_unique_list(prefixes)
         unique_input_languages = create_unique_list(input_languages)
         unique_output_languages = create_unique_list(output_languages)
-        if len(unique_prefix_list) == 1 and len(unique_input_languages) == 1 and len(unique_output_languages) == 1:
+        memory_wordss = create_unique_list(memory_wordss)
+        if len(unique_prefix_list) == 1 and len(unique_input_languages) == 1 and len(unique_output_languages) == 1 and len(memory_wordss) == 1:
             batch_runnable = True
 
         if batch_runnable:
@@ -160,14 +179,14 @@ def use_model(reqs):
                     result = {"hypo": "", "status":400, "message": 'Wrong option. Perform X->X "transcribe" or X->English "translate". Found {} -> {}'.format(unique_input_languages[0], unique_output_languages[0])}
                     req.publish(result)
                 return
-            hypos = infer_batch(audio_wavs=audio_tensors, input_language=input_languages[0], task=task, prefix=prefixes[0])
+            hypos = infer_batch(audio_wavs=audio_tensors, input_language=input_languages[0], task=task, prefix=prefixes[0], memory_words=memory_wordss[0])
 
             for req, hypo in zip(reqs, hypos):
                 result = {"hypo": hypo.strip()}
                 req.publish(result)
         else:
-            for req, audio_tensor, prefix, input_language, output_language \
-                    in zip(reqs, audio_tensors, prefixes[1:], input_languages, output_languages):
+            for req, audio_tensor, prefix, input_language, output_language, memory_words \
+                    in zip(reqs, audio_tensors, prefixes[1:], input_languages, output_languages, memory_wordss):
                 if not (input_language == output_language or output_language == 'en'):
                     result = {"hypo": "", "status":400, "message": 'Wrong option. Perform X->X "transcribe" or X->English "translate". Found {} -> {}'.format(input_language, output_language)}
                     req.publish(result)
@@ -177,7 +196,7 @@ def use_model(reqs):
                         task = "transcribe"
                     else:
                         task = "translate"
-                    hypo = infer_batch(audio_wavs=[audio_tensor], input_language=input_language, task=task, prefix=prefix)[0]                    
+                    hypo = infer_batch(audio_wavs=[audio_tensor], input_language=input_language, task=task, prefix=prefix, memory_words=memory_words)[0]
                     result = {"hypo": hypo.strip()}
                     req.publish(result)
 
@@ -243,6 +262,10 @@ def inference(input_language, output_language):
     if prefix is not None:
         prefix: str = prefix.read().decode("utf-8")
 
+    memory = request.files.get("memory") # can be None
+    if memory is not None:
+        memory: list = json.loads(memory.read().decode("utf-8"))
+
     # calculate features corresponding to a torchaudio.load(filepath) call
     audio_tensor = pcm_s16le_to_tensor(pcm_s16le).squeeze()
 
@@ -255,7 +278,7 @@ def inference(input_language, output_language):
     condition = threading.Condition()
     with condition:
         id = str(uuid.uuid4())
-        data = (audio_tensor,prefix,input_language,output_language)
+        data = (audio_tensor,prefix,input_language,output_language,memory)
 
         queue_in.put(Priority(priority,id,condition,data))
 

@@ -97,7 +97,7 @@ resume = len(checkpoint) > 0
 load = None
 
 if not resume and load is None:
-    model = WhisperForConditionalGenerationMemory.from_pretrained(model_name, torch_dtype="auto", device_map="cuda")
+    model = WhisperForConditionalGenerationMemory.from_pretrained(model_name, torch_dtype="auto", device_map="cuda", init_params=True)
 else:
     if resume:
         model = WhisperForConditionalGenerationMemory.from_pretrained(checkpoint[0], torch_dtype="auto", device_map="cuda")
@@ -117,7 +117,7 @@ training_args = Seq2SeqTrainingArguments(
     learning_rate=1e-4, #8e-4,
     lr_scheduler_type="constant_with_warmup",
     warmup_steps=500,
-    max_steps=100000,
+    max_steps=200000,
     gradient_checkpointing=False,
     fp16=True,
     evaluation_strategy="steps",

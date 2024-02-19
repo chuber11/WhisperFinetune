@@ -9,7 +9,7 @@ import torch.nn.functional as F
 from typing import Optional, Tuple, Union
 
 from transformers import WhisperForConditionalGeneration, WhisperConfig, WhisperModel
-from transformers.modeling_outputs import Seq2SeqLMOutput, Seq2SeqModelOutput, BaseModelOutputWithPastAndCrossAttentions
+from transformers.modeling_outputs import Seq2SeqLMOutput, Seq2SeqModelOutput, BaseModelOutput, BaseModelOutputWithPastAndCrossAttentions
 from transformers.models.whisper.modeling_whisper import WhisperEncoder, WhisperDecoder, WhisperDecoderLayer, WhisperPreTrainedModel, WhisperPositionalEmbedding
 from transformers.modeling_attn_mask_utils import _prepare_4d_causal_attention_mask, _prepare_4d_causal_attention_mask_for_sdpa
 
@@ -72,7 +72,7 @@ class WhisperDecoderLayerMemory(WhisperDecoderLayer):
         use_cache: Optional[bool] = True,
         memory = None):
 
-        outputs = super().forward(hidden_states, attention_mask, encoder_hidden_states, encoder_attention_mask, layer_head_mask, cross_attn_layer_head_mask, past_key_value, output_attentions, use_cache)
+        outputs = super().forward(hidden_states=hidden_states, attention_mask=attention_mask, encoder_hidden_states=encoder_hidden_states, encoder_attention_mask=encoder_attention_mask, layer_head_mask=layer_head_mask, cross_attn_layer_head_mask=cross_attn_layer_head_mask, past_key_value=past_key_value, output_attentions=output_attentions, use_cache=use_cache)
         hidden_states = outputs[0]
 
         residual = hidden_states
@@ -82,6 +82,8 @@ class WhisperDecoderLayerMemory(WhisperDecoderLayer):
         encoder_output_memory, memory_text_enc = memory
 
         cross_attn_weights, hidden_states = self.memory_attn(hidden_states, encoder_output_memory) # b x l_tgt x (n_mem+1)
+        #if cross_attn_weights.argmax(-1).item() > 0:
+        #    print(cross_attn_weights,encoder_output_memory.shape)
 
         hidden_states = nn.functional.dropout(hidden_states, p=self.dropout, training=self.training)
         hidden_states = residual + hidden_states
@@ -323,6 +325,10 @@ class EncoderMemory(nn.Module):
 class Seq2SeqModelOutputMemory(Seq2SeqModelOutput):
     all_memory_cross_attentions: Optional[Tuple[torch.FloatTensor, ...]] = None
 
+@dataclass
+class BaseModelOutputMemory(BaseModelOutput):
+    memory: Optional[Tuple[torch.FloatTensor, ...]] = None
+
 class WhisperModelMemory(WhisperModel):
     def __init__(self, config: WhisperConfig):
         super(WhisperPreTrainedModel, self).__init__(config)
@@ -341,7 +347,7 @@ class WhisperModelMemory(WhisperModel):
         for p in self.decoder.parameters():
             p.requires_grad = False
 
-        self.two_decoders = False
+        self.two_decoders = True
 
     def forward(
         self,
@@ -381,6 +387,7 @@ class WhisperModelMemory(WhisperModel):
             )
 
             memory = self.encoder_memory(memory)
+            #print("1) Encoded memory of size", len(memory[0])-1)
 
         # If the user passed a tuple for encoder_outputs, we wrap it in a BaseModelOutput when return_dict=True
         elif return_dict and not isinstance(encoder_outputs, BaseModelOutput):
@@ -390,7 +397,16 @@ class WhisperModelMemory(WhisperModel):
                 attentions=encoder_outputs[2] if len(encoder_outputs) > 2 else None,
             )
 
+        if "memory" in encoder_outputs and encoder_outputs.memory is not None:
+            memory = encoder_outputs.memory
+
         if self.two_decoders:
+            if past_key_values is None:
+                past_key_values_nomem = None
+            else:
+                past_key_values_nomem = past_key_values[:len(past_key_values)//2]
+                past_key_values = past_key_values[len(past_key_values)//2:]
+
             # decoder outputs consists of (dec_features, past_key_value, dec_hidden, dec_attn)
             decoder_outputs = self.decoder(
                 input_ids=decoder_input_ids,
@@ -398,7 +414,7 @@ class WhisperModelMemory(WhisperModel):
                 encoder_hidden_states=encoder_outputs[0],
                 head_mask=decoder_head_mask,
                 cross_attn_head_mask=cross_attn_head_mask,
-                past_key_values=past_key_values,
+                past_key_values=past_key_values_nomem,
                 inputs_embeds=decoder_inputs_embeds,
                 #position_ids=decoder_position_ids,
                 use_cache=use_cache,
@@ -427,7 +443,10 @@ class WhisperModelMemory(WhisperModel):
         if not self.two_decoders:
             decoder_outputs = decoder_outputs_memory
         else:
-            breakpoint() # TODO
+            mask = torch.stack([c.argmax(-1).gt(0) for c in decoder_outputs_memory['all_memory_cross_attentions']]).any(0) # b x l_tgt
+            decoder_outputs["last_hidden_state"][mask] = decoder_outputs_memory["last_hidden_state"][mask]
+
+            decoder_outputs['past_key_values'] = decoder_outputs['past_key_values'] + decoder_outputs_memory['past_key_values']
 
         if not return_dict:
             return decoder_outputs + encoder_outputs
@@ -487,6 +506,7 @@ class WhisperForConditionalGenerationMemoryWrapper(WhisperForConditionalGenerati
         return_dict: Optional[bool] = None,
         memory = None,
         memory_labels = None,
+        encoder_outputs_memory = None, # always only dummy
     ) -> Union[Tuple[torch.Tensor], Seq2SeqLMOutputMemory]:
         return_dict = return_dict if return_dict is not None else self.config.use_return_dict
 
@@ -495,6 +515,8 @@ class WhisperForConditionalGenerationMemoryWrapper(WhisperForConditionalGenerati
                 decoder_input_ids = shift_tokens_right(
                     labels, self.config.pad_token_id, self.config.decoder_start_token_id
                 )
+
+        #print(decoder_input_ids)
 
         outputs = self.model(
             input_features,
@@ -585,15 +607,31 @@ class WhisperForConditionalGenerationMemoryWrapper(WhisperForConditionalGenerati
             anz_total = anz_total,
         )
 
+    def _prepare_encoder_decoder_kwargs_for_generation(self, inputs_tensor: torch.Tensor, model_kwargs, model_input_name: Optional[str] = None):
+        if not "encoder_outputs_memory" in model_kwargs:
+            model_kwargs = super()._prepare_encoder_decoder_kwargs_for_generation(inputs_tensor, model_kwargs, model_input_name)
+        else:
+            model_kwargs["encoder_outputs"] = model_kwargs["encoder_outputs_memory"]
+            del model_kwargs["encoder_outputs_memory"]
+        memory = model_kwargs["memory"] if "memory" in model_kwargs else None
+        memory = self.model.encoder_memory(memory)
+        print("2) Encoded memory of size", len(memory[0])-1)
+        model_kwargs["encoder_outputs"] = BaseModelOutputMemory(*model_kwargs["encoder_outputs"].values(),memory=memory)
+        #print(model_kwargs["encoder_outputs"])
+        return model_kwargs
+        
 class WhisperForConditionalGenerationMemory(nn.Module):
     @classmethod
-    def from_pretrained(cls, model_name, torch_dtype="auto", device_map="cuda"):
-        model = WhisperForConditionalGeneration.from_pretrained(model_name, torch_dtype=torch_dtype, device_map=device_map)
-        state_dict = model.state_dict()
-        config = model.config
-        model = WhisperForConditionalGenerationMemoryWrapper(config)
-        model.load_state_dict(state_dict, strict=False)
-        model.model.decoder_memory.load_state_dict(model.model.decoder.state_dict(), strict=False)
+    def from_pretrained(cls, model_name, torch_dtype="auto", device_map="cuda", init_params=False):
+        if init_params:
+            model = WhisperForConditionalGeneration.from_pretrained(model_name, torch_dtype=torch_dtype, device_map=device_map)
+            state_dict = model.state_dict()
+            config = model.config
+            model = WhisperForConditionalGenerationMemoryWrapper(config)
+            model.load_state_dict(state_dict, strict=False)
+            model.model.decoder_memory.load_state_dict(model.model.decoder.state_dict(), strict=False)
+        else:
+            return WhisperForConditionalGenerationMemoryWrapper.from_pretrained(model_name, torch_dtype=torch_dtype, device_map=device_map)
         return model
 
     def forward(self, *args, **kwargs):
