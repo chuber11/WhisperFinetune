@@ -21,21 +21,21 @@ for line,line2,line3 in zip(open(segfile),open(new_words),open(references)):
 
     wav_ = wav[int(32000*start):int(32000*end)]
 
-    use_memory = True
-    if use_memory:
-        memory = [w for w in new_word.split()]
-        print("MEMORY:",memory)
-        res = requests.post("http://192.168.0.72:5000/asr/infer/en,en", files={"pcm_s16le":wav_, "prefix": "", "memory":json.dumps(memory)})
-    else:
-        res = requests.post("http://192.168.0.72:5000/asr/infer/en,en", files={"pcm_s16le":wav_, "prefix": "", "memory":json.dumps([])})
+    memory = [w for w in new_word.split()]
+    print("MEMORY:",memory)
 
-    hypo = res.json()["hypo"]
+    res = requests.post("http://192.168.0.72:5000/asr/infer/en,en", files={"pcm_s16le":wav_, "prefix": "", "memory":json.dumps(memory)})
+    hypo_mem = res.json()["hypo"]
+    
+    res = requests.post("http://192.168.0.72:5000/asr/infer/en,en", files={"pcm_s16le":wav_, "prefix": "", "memory":json.dumps([])})
+    hypo_nomem = res.json()["hypo"]
 
-    print("REF:",reference)
-    print("HYPO:",hypo)
-    print("NEW WORD:",new_word,new_word in hypo)
+    print("REF:      ",reference)
+    print("HYPOMEM:  ",hypo_mem)
+    print("HYPONOMEM:",hypo_nomem)
+    print("NEW WORD:",new_word,new_word in hypo_mem)
 
-    if new_word in hypo:
+    if new_word in hypo_mem:
         correct += 1
     total += 1
 
