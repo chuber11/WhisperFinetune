@@ -53,6 +53,7 @@ class MySeq2SeqTrainer(Seq2SeqTrainer):
         super().__init__(*args, **kwargs)
         
         self.statistics = [0.0 for _ in range(num_statistics)]
+        self.label_names = ["labels"]
 
     def log(self, logs):
         logs.update(self.compute_mymetrics())
@@ -117,101 +118,129 @@ class MyCallback(TrainerCallback):
         if state.global_step == 1:
             pass #control.should_evaluate = True
 
-if len(sys.argv)<=1:
-    print("Usage: python -u train.py modelname | tee -a logs/log_modelname.txt")
-    sys.exit()
+import argparse
 
-########## arguments for training ################################
+parser = argparse.ArgumentParser()
 
-#segfiles = "data/*.train.seg.aligned"
-segfiles = "../WhisperE+Phi2/data/cv.*.train.seg.aligned"
-#segfiles = "../WhisperE+Phi2/data_augment/*.train.seg.aligned"
+parser.add_argument('--segfiles', type=str, nargs="+", help='Data used for training', default=["../WhisperE+Phi2/data/cv.*.train.seg.aligned"])
+parser.add_argument('--dataset_factors', type=int, nargs="+", help='Upscaling factors for datasets', default=None)
+parser.add_argument('--segfiles_dev', type=str, nargs="+", help='Data used for evaluation', default=["../WhisperE+Phi2/data/cv.*.dev.seg.aligned"])
+parser.add_argument('--dataset_factors_dev', type=int, nargs="+", help='Upscaling factors for evaluation datasets', default=None)
+parser.add_argument('--use_memory', action="store_true", help='Generate memory in dataset')
+parser.add_argument('--use_early_stopping', type=int, help='Use early stopping', default=10)
+parser.add_argument('--model_name', type=str, help='Model architecture to train', default="openai/whisper-large-v2")
+parser.add_argument('--model_path', type=str, help='Path to store the trained model', default="./saves/model_test")
+parser.add_argument('--load', type=str, help='For loading one model but training with new     optimizer under other name', default=None)
+parser.add_argument('--log_steps', type=int, help='Print log every x steps', default=10)
+parser.add_argument('--eval_steps', type=int, help='Run cross validation every x steps', default=1000)
+parser.add_argument('--learning_rate', type=float, default=2e-4)
+parser.add_argument('--gradient_checkpointing', action="store_true", help='Use gradient_checkpointing')
+parser.add_argument('--factorization_rank', type=int, help='Factorization rank', default=0)
+parser.add_argument('--factorization_only_decoder', action="store_true", help='Use factorization only on decoder and freeze encoder')
+parser.add_argument('--factorization_only_save_factorization_parameters', action="store_true", help='Only save the factorization parameters')
+parser.add_argument('--batch_size', type=int, help='Batch size', default=8)
+parser.add_argument('--gradient_accumulation_steps', type=int, help='Gradient accumulation steps', default=4)
+parser.add_argument('--warmup_steps', type=int, help='Warmup steps', default=500)
 
-segfiles_dev = segfiles.replace("train","dev")
+args = parser.parse_args()
+print(args)
 
-memory = True
-early_stopping = 10
+assert args.eval_steps % args.log_steps == 0
 
-#model_name = "openai/whisper-large-v3"
-#model_name = "openai/whisper-medium"
-model_name = "openai/whisper-large-v2"
-
-load = None #"saves/model_newwords/checkpoint-99000" # For loading one model but training with new optimizer under other name
-
-eval_steps = 1000 # evaluation every x updates
-
-learning_rate = 2e-4
-
-if not memory:
+if not args.use_memory:
     model_class = WhisperForConditionalGeneration
     trainer_class = MySeq2SeqTrainer
 else:
     model_class = WhisperForConditionalGenerationMemory
     trainer_class = MySeq2SeqTrainerMemory
 
-########## end arguments for training ############################
+output_dir=args.model_path
 
-model_path = sys.argv[1]
-output_dir="./saves/"+model_path
 
 checkpoint = glob(output_dir+"/checkpoint*")
 resume = len(checkpoint) > 0
 
 dataset = {} #DatasetDict()
 
-if type(segfiles) is not list:
-    dataset["train"] = MyDataset(segfiles, memory=memory)
+if len(args.segfiles) == 1 and args.dataset_factors is None:
+    dataset["train"] = MyDataset(args.segfiles[0], memory=args.use_memory)
 else:
-    dataset["train"] = ConcatDataset([MyDataset(s, memory=memory) for s in segfiles])
+    dataset["train"] = ConcatDataset([MyDataset(s, memory=args.use_memory) for s in args.segfiles], factors=args.dataset_factors)
 #dataset["train"][0]
-if type(segfiles_dev) is not list:
-    dataset["dev"] = MyDataset(segfiles_dev, dev=True, memory=memory)
+if len(args.segfiles_dev) == 1 and args.dataset_factors_dev is None:
+    dataset["dev"] = MyDataset(args.segfiles_dev[0], dev=True, memory=args.use_memory)
 else:
-    dataset["dev"] = ConcatDataset([MyDataset(s, dev=True, memory=memory) for s in segfiles_dev])
+    dataset["dev"] = ConcatDataset([MyDataset(s, dev=True, memory=args.use_memory) for s in args.segfiles_dev], factors=args.dataset_factors_dev)
 
-print(len(dataset["train"]))
-print(len(dataset["dev"]))
-
-tokenizer = WhisperTokenizerFast.from_pretrained(model_name)
+tokenizer = WhisperTokenizerFast.from_pretrained(args.model_name)
 #tokenizer.set_prefix_tokens(language="german", task="transcribe")
 tokenizer.set_prefix_tokens(task="transcribe")
-processor = WhisperProcessor.from_pretrained(model_name)
+processor = WhisperProcessor.from_pretrained(args.model_name)
 
 data_collator = DataCollatorSpeechSeq2SeqWithPadding(processor=processor, tokenizer=tokenizer)
 
 #data_collator([dataset["train"][i] for i in range(32)])
 
-if not resume and load is None:
+possible_factorization = False
+
+if not resume and args.load is None:
     if model_class == WhisperForConditionalGenerationMemory:
-        model = model_class.from_pretrained(model_name, torch_dtype="auto", device_map="cuda", init_params=True)
+        model = model_class.from_pretrained(args.model_name, torch_dtype="auto", device_map="cuda", init_params=True)
     else:
-        model = model_class.from_pretrained(model_name, torch_dtype="auto", device_map="cuda")
+        model = model_class.from_pretrained(args.model_name, torch_dtype="auto", device_map="cuda")
+
+    possible_factorization = True
 else:
     if resume:
         model = model_class.from_pretrained(checkpoint[0], torch_dtype="auto", device_map="cuda")
         print("Resuming training with",checkpoint[0])
     else:
-        model = model_class.from_pretrained(load, torch_dtype="auto", device_map="cuda")
-        print("Loading checkpoint from",load)
+        model = model_class.from_pretrained(args.load, torch_dtype="auto", device_map="cuda")
+        print("Loading checkpoint from",args.load)
+
+        possible_factorization = True
+
+if possible_factorization and args.factorization_rank > 0:
+    from peft import get_peft_model, LoraConfig
+
+    peft_config = LoraConfig(inference_mode=False, r=args.factorization_rank, lora_alpha=16, lora_dropout=0.1, bias="all", target_modules=["q_proj", "k_proj", "v_proj", "out_proj", "fc1", "fc2"])
+
+    if not args.factorization_only_decoder:
+        model = get_peft_model(model, peft_config)
+        model.print_trainable_parameters()
+    else:
+        for p in model.get_encoder().parameters():
+            p.requires_grad = False
+        model.model.decoder = get_peft_model(model.model.decoder, peft_config)
+        model.model.decoder.print_trainable_parameters()
+
+    """from model_factorization import FactorizationWrapper
+
+    if not args.factorization_only_decoder:
+        model = FactorizationWrapper(model, args.factorization_rank)
+    else:
+        for p in model.get_encoder().parameters():
+            p.requires_grad = False
+        model.model.decoder = FactorizationWrapper(model.model.decoder, args.factorization_rank)"""
 
 print(f"Number of parameters: {sum(p.numel() for p in model.parameters())/1000000:.0f} M, number of trainable parameters: {sum(p.numel() for p in model.parameters() if p.requires_grad)/1000000:.0f} M")
 
 training_args = Seq2SeqTrainingArguments(
     output_dir=output_dir,
-    per_device_train_batch_size=16,
-    gradient_accumulation_steps=2,  # increase by 2x for every 2x decrease in batch size
-    learning_rate=learning_rate,
+    per_device_train_batch_size=args.batch_size,
+    gradient_accumulation_steps=args.gradient_accumulation_steps, # increase by 2x for every 2x decrease in batch size
+    learning_rate=args.learning_rate,
     lr_scheduler_type="constant_with_warmup",
-    warmup_steps=500,
+    warmup_steps=args.warmup_steps,
     max_steps=200000,
-    gradient_checkpointing=False,
+    gradient_checkpointing=args.gradient_checkpointing,
     fp16=True,
     evaluation_strategy="steps",
-    per_device_eval_batch_size=32,
+    per_device_eval_batch_size=args.batch_size,
     predict_with_generate=False,#True,
-    save_steps=eval_steps,
-    eval_steps=eval_steps,
-    logging_steps=10,
+    save_steps=args.eval_steps,
+    eval_steps=args.eval_steps,
+    logging_steps=args.log_steps,
     save_total_limit=1,
     #report_to=["tensorboard"],
     load_best_model_at_end=True,
@@ -231,7 +260,7 @@ trainer = trainer_class(
     compute_metrics=compute_metrics,
     #tokenizer=processor.feature_extractor,
     #tokenizer=processor.tokenizer,
-    callbacks=[MyCallback]+([EarlyStoppingCallback(early_stopping_patience=early_stopping)] if early_stopping>0 else []),
+    callbacks=[MyCallback]+([EarlyStoppingCallback(early_stopping_patience=args.use_early_stopping)] if args.use_early_stopping>0 else []),
 )
 
 trainer.train(resume_from_checkpoint=resume)

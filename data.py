@@ -39,6 +39,9 @@ class MyDataset(Dataset):
         for segfile in glob(segfiles):
             print(segfile)
             labelfile = ".".join(segfile.split(".")[:-2])+".cased"
+            if not os.path.isfile(labelfile):
+                labelfile = labelfile[:-len(".cased")]+".ref"
+
             for line, line2 in zip(open(segfile),open(labelfile)):
                 line = line.strip().split()
                 self.ids.append(line[0])
@@ -94,6 +97,8 @@ class MyDataset(Dataset):
 
             self.new_words = list(torch.load(new_words_list))
 
+        print("Dataset has length",len(self))
+
     def __len__(self):
         return self.len
 
@@ -122,12 +127,14 @@ class MyDataset(Dataset):
 
 class ConcatDataset(Dataset):
     def __init__(self, datasets, factors=None):
-        self.dataset = datasets
+        self.datasets = datasets
         self.factors = factors is not None
 
         self.cumulative_lengths = self._compute_cumulative_lengths(datasets, factors)
 
-        self.order = random.sample(range(self.len), self.len)
+        self.order = random.sample(range(len(self)), len(self))
+
+        print("ConcatDataset has length",len(self))
 
     def _compute_cumulative_lengths(self, datasets, factors):
         cumulative_lengths = []
@@ -247,7 +254,6 @@ class DataCollatorSpeechSeq2SeqWithPadding:
 
 def compute_metrics(pred):
     #print(pred)
-    breakpoint()
     return {}
 
     breakpoint()

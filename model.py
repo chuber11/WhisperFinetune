@@ -82,7 +82,7 @@ class WhisperDecoderLayerMemory(WhisperDecoderLayer):
             key_value_states = memory_text_enc[mem_attn_out] # mask.sum() x l_mem x d_model
             attention_mask = memory_text_mask[mem_attn_out].unsqueeze(1).unsqueeze(1) # mask.sum() x 1 x 1 x l_mem
 
-            memory_entry_attn = self.memory_entry_attn(hidden_states=hidden_states, key_value_states=key_value_states, attention_mask=attention_mask)[0]
+            memory_entry_attn = self.memory_entry_attn(hidden_states=hidden_states, key_value_states=key_value_states, attention_mask=attention_mask)[0] # mask.sum() x 1 x d_model
 
             output = torch.zeros_like(dec_output, dtype=memory_entry_attn.dtype) # b*l_tar x d_model
             output[indices] = memory_entry_attn[:,0]
