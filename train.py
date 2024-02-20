@@ -80,20 +80,14 @@ class MySeq2SeqTrainer(Seq2SeqTrainer):
 
 class MySeq2SeqTrainerMemory(MySeq2SeqTrainer):
     def __init__(self, *args, **kwargs):
-        super().__init__(*args, num_statistics=9, **kwargs)
+        super().__init__(*args, **kwargs)
+
+        self.statistics = 0
         
     def compute_loss(self, model, inputs, return_outputs=False):
-        res = super().compute_loss(model, inputs, return_outputs=True)
+        res = super(Seq2SeqTrainer, self).compute_loss(model, inputs, return_outputs=True)
 
-        self.statistics[0] += res[1].loss_ntp.detach().item()
-        self.statistics[1] += 1
-        self.statistics[2] += res[1].loss_memory_total.detach().item()
-        self.statistics[3] += res[1].anz_layers.item()
-        self.statistics[4] += res[1].loss_memory_mem.detach().item()
-        self.statistics[5] += res[1].anz_mem.item()
-        self.statistics[6] += res[1].acc_mem.item()
-        self.statistics[7] += res[1].acc_nomem.item()
-        self.statistics[8] += res[1].anz_total.item()
+        self.statistics += res[1].statistics.cpu().numpy()
 
         if return_outputs:
             return res
@@ -103,14 +97,15 @@ class MySeq2SeqTrainerMemory(MySeq2SeqTrainer):
     def compute_mymetrics(self):
         logs = {}
         if self.statistics[1] > 0:
-            logs["loss_ntp"] = self.statistics[0]/self.statistics[1]
-            logs["ppl_ntp"] = math.exp(self.statistics[0]/self.statistics[1])
-            logs["loss_memory_total"] = self.statistics[2]/self.statistics[3]
-            logs["ppl_memory_total"] = math.exp(self.statistics[2]/self.statistics[3])
-            logs["acc_memory_nomem"] = self.statistics[7]/(self.statistics[8]-self.statistics[5])
-            logs["ppl_memory_mem"] = math.exp(self.statistics[4]/self.statistics[5])
-            logs["acc_memory_mem"] = self.statistics[6]/self.statistics[5]
-            self.statistics = [0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0]
+            index = 0
+            for l in ["_npt","_mem"]:
+                for m in ["_all","_nomem","_mem"]:
+                    logs["loss"+l+m] = self.statistics[index]/self.statistics[index+2]
+                    logs["ppl"+l+m] = math.exp(self.statistics[index]/self.statistics[index+2])
+                    logs["acc"+l+m] = self.statistics[index+1]/self.statistics[index+2]
+                    index += 3
+            logs = {k:v for k,v in sorted(list(logs.items()))}
+            self.statistics = 0
         return logs
 
 class MyCallback(TrainerCallback):

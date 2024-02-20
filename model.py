@@ -518,14 +518,23 @@ class WhisperModelMemory(WhisperModel):
 
 @dataclass
 class Seq2SeqLMOutputMemory(Seq2SeqLMOutput):
-    loss_ntp: Optional[torch.FloatTensor] = None
-    loss_memory_total: Optional[torch.FloatTensor] = None
-    anz_layers: Optional[torch.FloatTensor] = None
-    loss_memory_mem: Optional[torch.FloatTensor] = None
-    anz_mem: Optional[torch.FloatTensor] = None
-    acc_mem: Optional[torch.FloatTensor] = None
-    acc_nomem: Optional[torch.FloatTensor] = None
-    anz_total: Optional[torch.FloatTensor] = None
+    statistics: Optional[torch.FloatTensor] = None
+
+def get_loss(logits, labels, mask, mean=False): # shapes L x N, L, L
+    #if labels.max() >= logits.shape[1] or labels.min() < 0:
+    #    breakpoint()
+    if not mean:
+        return F.softmax(logits, -1).gather(1, labels.unsqueeze(-1))[:,0][mask].sum()
+    else:
+        return F.softmax(logits, -1).gather(1, labels.unsqueeze(-1))[:,0][mask].mean()
+
+def add_loss(statistics, logits, labels, mask):
+    loss = get_loss(logits, labels, mask)
+    acc = logits.argmax(-1).eq(labels)[mask].sum()
+    anz = mask.sum()
+    statistics.append(loss)
+    statistics.append(acc)
+    statistics.append(anz)
 
 class WhisperForConditionalGenerationMemoryWrapper(WhisperForConditionalGeneration):
     def __init__(self, config: WhisperConfig):
@@ -595,50 +604,40 @@ class WhisperForConditionalGenerationMemoryWrapper(WhisperForConditionalGenerati
         if labels is not None:
             loss_fct = CrossEntropyLoss()
             # move labels to correct device to enable PP
-            labels = labels.to(lm_logits.device)
-            loss = loss_fct(lm_logits.view(-1, self.config.vocab_size), labels.reshape(-1))
+            labels = labels.to(lm_logits.device).reshape(-1)
+            loss = loss_fct(lm_logits.view(-1, self.config.vocab_size), labels)
 
         if not return_dict:
             output = (lm_logits,) + outputs[1:]
             return ((loss,) + output) if loss is not None else output
 
-        loss_ntp = loss
-
-        loss_memory_total = 0
-        anz_layers = torch.zeros(1)
-
-        loss_memory_mem = 0
-        anz_mem = torch.zeros(1)
-
-        acc_mem = torch.zeros(1)
-        acc_nomem = torch.zeros(1)
-        anz_total = torch.zeros(1)
-
         if memory_labels is not None:
-            loss_fct_mem = CrossEntropyLoss(ignore_index=0, reduction="sum")
+            factor_mem = 1e-1
+
             memory_labels = memory_labels.to(lm_logits.device).reshape(-1)
+            mask = labels.ge(0)
 
             for cross_attn_weights in outputs.all_memory_cross_attentions:
                 cross_attn_weights = cross_attn_weights.view(-1, cross_attn_weights.shape[-1])
-                loss_memory_total_ = loss_fct(cross_attn_weights, memory_labels)
-                loss_memory_total = loss_memory_total + loss_memory_total_
-                anz_layers += 1
+                loss = loss + factor_mem*get_loss(cross_attn_weights, memory_labels, mask, mean=True) #loss_fct(cross_attn_weights, memory_labels)
 
-            loss = loss + 1e-1 * loss_memory_total
+            statistics = []
 
-            loss_memory_mem += loss_fct_mem(cross_attn_weights, memory_labels)
+            logits = lm_logits.view(-1, self.config.vocab_size).detach()
+            labels_c = labels.clone()
+            labels_c[labels_c.lt(0)] = 0
+            add_loss(statistics, logits, labels_c, mask)
+            mask2 = mask & memory_labels.eq(0)
+            add_loss(statistics, logits, labels_c, mask2)
+            mask3 = mask & memory_labels.gt(0)
+            add_loss(statistics, logits, labels_c, mask3)
 
-            pred_mem_entries = cross_attn_weights.argmax(-1)
-            mask = pred_mem_entries.eq(memory_labels)
+            logits2 = cross_attn_weights.detach()
+            add_loss(statistics, logits2, memory_labels, mask)
+            add_loss(statistics, logits2, memory_labels, mask2)
+            add_loss(statistics, logits2, memory_labels, mask3)
 
-            mask_mem = memory_labels.gt(0)
-            mask_nomem = memory_labels.eq(0)
-
-            acc_mem += mask[mask_mem].sum().to(acc_mem.device)
-            acc_nomem += mask[mask_nomem].sum().to(acc_nomem.device)
-
-            anz_mem += mask_mem.sum().to(anz_mem.device)
-            anz_total += pred_mem_entries.shape[0]
+            statistics = torch.stack(statistics)
 
         return Seq2SeqLMOutputMemory(
             loss=loss,
@@ -650,14 +649,7 @@ class WhisperForConditionalGenerationMemoryWrapper(WhisperForConditionalGenerati
             encoder_last_hidden_state=outputs.encoder_last_hidden_state,
             encoder_hidden_states=outputs.encoder_hidden_states,
             encoder_attentions=outputs.encoder_attentions,
-            loss_ntp = loss_ntp,
-            loss_memory_total = loss_memory_total,
-            anz_layers = anz_layers,
-            loss_memory_mem = loss_memory_mem,
-            anz_mem = anz_mem,
-            acc_mem = acc_mem,
-            acc_nomem = acc_nomem,
-            anz_total = anz_total,
+            statistics=statistics,
         )
 
     def _prepare_encoder_decoder_kwargs_for_generation(self, inputs_tensor: torch.Tensor, model_kwargs, model_input_name: Optional[str] = None):
