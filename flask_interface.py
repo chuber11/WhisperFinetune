@@ -33,7 +33,8 @@ def initialize_model():
 
     processor.get_decoder_prompt_ids(language="en", task="transcribe") # WARNING: Changes state of processor
     
-    model_path = "saves/model_newwords2/checkpoint-103000"
+    #model_path = "saves/model_newwords/checkpoint-99000"
+    model_path = "saves/model_newwords2/checkpoint-27000"
     model = WhisperForConditionalGenerationMemory.from_pretrained(model_path)
     
     print("ASR initialized")
@@ -57,13 +58,14 @@ def infer_batch(audio_wavs, prefix="", input_language="en", task="transcribe", a
         
     input_values = torch.cat([processor(item, sampling_rate=audio_sample_rate, return_tensors="pt").input_features for item in audio_wavs], dim=0).to(device)
 
-    if memory_words is not None:
+    if memory_words is not None and len(memory_words) > 0:
         memory = processor.tokenizer(memory_words, return_tensors="pt", padding=True)
         memory["input_ids"] = memory["input_ids"][:,4:].to(device)
         memory["attention_mask"] = memory["attention_mask"][:,4:].to(device)
+        print([[processor.tokenizer.decode(i) for i in memory["input_ids"][j]] for j in range(len(memory["input_ids"]))])
+        print(memory["attention_mask"])
     else:
         memory = None
-    #print([processor.tokenizer.decode(i) for i in memory["input_ids"][0]])
     
     if input_language != "None" and not "+" in input_language:
         forced_decoder_ids = processor.get_decoder_prompt_ids(language=input_language, task=task)

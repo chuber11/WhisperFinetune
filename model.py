@@ -65,8 +65,8 @@ class WhisperDecoderLayerMemory(WhisperDecoderLayer):
     def calc_memory_entry_attn(self, dec_output, mem_attn_out, memory_text_enc, memory_text_mask):
         b, l_tar, _ = mem_attn_out.shape
 
-        #if memory_text_enc is None:
-        #    return
+        if memory_text_enc is None:
+            return
 
         mem_attn_out = mem_attn_out[:, :, :memory_text_enc.shape[1] + 1].argmax(-1).view(-1) - 1 # b*l_tar
 
@@ -85,7 +85,7 @@ class WhisperDecoderLayerMemory(WhisperDecoderLayer):
             memory_entry_attn = self.memory_entry_attn(hidden_states=hidden_states, key_value_states=key_value_states, attention_mask=attention_mask)[0]
 
             output = torch.zeros_like(dec_output, dtype=memory_entry_attn.dtype) # b*l_tar x d_model
-            output[indices] = memory_entry_attn[0]
+            output[indices] = memory_entry_attn[:,0]
 
             return output.view(b, l_tar, -1) # b x l_tar x d_model
         else:
@@ -344,7 +344,7 @@ class EncoderMemory(nn.Module):
 
     def forward(self, memory):
         if memory is None:
-            return self.no_entry_found, None
+            return self.no_entry_found, None, None
 
         memory_text_embeds, memory_text_mask = self.decoder[0].embed_tokens(memory["input_ids"]), memory["attention_mask"]
         if self.linear is not None:
@@ -624,7 +624,7 @@ class WhisperForConditionalGenerationMemoryWrapper(WhisperForConditionalGenerati
                 loss_memory_total = loss_memory_total + loss_memory_total_
                 anz_layers += 1
 
-            loss = loss + 1e-2 * loss_memory_total
+            loss = loss + 1e-1 * loss_memory_total
 
             loss_memory_mem += loss_fct_mem(cross_attn_weights, memory_labels)
 
