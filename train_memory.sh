@@ -1,5 +1,5 @@
 
-model_name="newwords2"
+model_name="${2:-newwords2}"
 
 clear
 
@@ -21,7 +21,7 @@ fi
 
 python -u train.py --model_path ./saves/model_$model_name \
     --use_memory \
-    --warmup_steps 5000 --learning_rate 2e-4 \
+    --warmup_steps 500 --learning_rate 2e-4 \
     --log_steps 10 \
     --eval_steps 1000 --use_early_stopping 100 \
     `#--gradient_checkpointing` \

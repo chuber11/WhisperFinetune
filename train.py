@@ -15,8 +15,12 @@ import math
 
 import sys
 from glob import glob
+import os
+import json
 
 import subprocess
+
+from peft import get_peft_model, LoraConfig, PeftModel
 
 def get_git_commit_hash():
     try:
@@ -82,12 +86,17 @@ class MySeq2SeqTrainerMemory(MySeq2SeqTrainer):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
 
-        self.statistics = 0
+        self.statistics = None
         
     def compute_loss(self, model, inputs, return_outputs=False):
         res = super(Seq2SeqTrainer, self).compute_loss(model, inputs, return_outputs=True)
 
-        self.statistics += res[1].statistics.cpu().numpy()
+        if self.statistics is None:
+            self.statistics = res[1].statistics.cpu().tolist()
+        else:
+            s_new = res[1].statistics.cpu().tolist()
+            for i in range(len(self.statistics)):
+                self.statistics[i] += s_new[i]
 
         if return_outputs:
             return res
@@ -96,22 +105,36 @@ class MySeq2SeqTrainerMemory(MySeq2SeqTrainer):
 
     def compute_mymetrics(self):
         logs = {}
-        if self.statistics[1] > 0:
-            index = 0
-            for l in ["_npt","_mem"]:
-                for m in ["_all","_nomem","_mem"]:
+        index = 0
+        for l in ["_ntp","_mem"]:
+            for m in ["_all","_nomem","_mem"]:
+                if self.statistics[index+2] > 0:
                     logs["loss"+l+m] = self.statistics[index]/self.statistics[index+2]
                     logs["ppl"+l+m] = math.exp(self.statistics[index]/self.statistics[index+2])
                     logs["acc"+l+m] = self.statistics[index+1]/self.statistics[index+2]
-                    index += 3
-            logs = {k:v for k,v in sorted(list(logs.items()))}
-            self.statistics = 0
+                index += 3
+        logs = {k:v for k,v in sorted(list(logs.items()))}
+        for i in range(len(self.statistics)):
+            self.statistics[i] = 0
         return logs
 
 class MyCallback(TrainerCallback):
     def on_step_end(self, args, state, control, **kwargs): # Evaluate at the beginning of the training
         if state.global_step == 1:
             pass #control.should_evaluate = True
+
+def add_lora(model, factorization_rank, factorization_only_decoder):
+    peft_config = LoraConfig(inference_mode=False, r=factorization_rank, lora_alpha=16, lora_dropout=0.1, bias="all", target_modules=["q_proj", "k_proj", "v_proj", "out_proj", "fc1", "fc2"])
+
+    if not factorization_only_decoder:
+        model = get_peft_model(model, peft_config)
+        model.print_trainable_parameters()
+    else:
+        for p in model.get_encoder().parameters():
+            p.requires_grad = False
+        model.model.decoder = get_peft_model(model.model.decoder, peft_config)
+        model.model.decoder.print_trainable_parameters()
+    return model
 
 import argparse
 
@@ -125,7 +148,7 @@ parser.add_argument('--use_memory', action="store_true", help='Generate memory i
 parser.add_argument('--use_early_stopping', type=int, help='Use early stopping', default=10)
 parser.add_argument('--model_name', type=str, help='Model architecture to train', default="openai/whisper-large-v2")
 parser.add_argument('--model_path', type=str, help='Path to store the trained model', default="./saves/model_test")
-parser.add_argument('--load', type=str, help='For loading one model but training with new     optimizer under other name', default=None)
+parser.add_argument('--load', type=str, help='For loading one model but training with new optimizer under other name', default=None)
 parser.add_argument('--log_steps', type=int, help='Print log every x steps', default=10)
 parser.add_argument('--eval_steps', type=int, help='Run cross validation every x steps', default=1000)
 parser.add_argument('--learning_rate', type=float, default=2e-4)
@@ -142,6 +165,9 @@ print(args)
 
 assert args.eval_steps % args.log_steps == 0
 
+if args.load == "None":
+    args.load = None
+
 if not args.use_memory:
     model_class = WhisperForConditionalGeneration
     trainer_class = MySeq2SeqTrainer
@@ -150,7 +176,6 @@ else:
     trainer_class = MySeq2SeqTrainerMemory
 
 output_dir=args.model_path
-
 
 checkpoint = glob(output_dir+"/checkpoint*")
 resume = len(checkpoint) > 0
@@ -178,6 +203,7 @@ data_collator = DataCollatorSpeechSeq2SeqWithPadding(processor=processor, tokeni
 
 possible_factorization = False
 
+load_adapter = None
 if not resume and args.load is None:
     if model_class == WhisperForConditionalGenerationMemory:
         model = model_class.from_pretrained(args.model_name, torch_dtype="auto", device_map="cuda", init_params=True)
@@ -190,33 +216,29 @@ else:
         model = model_class.from_pretrained(checkpoint[0], torch_dtype="auto", device_map="cuda")
         print("Resuming training with",checkpoint[0])
     else:
+        files = glob(args.load+"/*/config.json")
+        if len(files) == 0:
+            files = glob(args.load+"/*/adapter_config.json")
+            if len(files) != 1:
+                print(files)
+                raise RuntimeError
+            load_adapter = args.load
+            args.load = json.load(open(files[0]))["base_model_name_or_path"]
         model = model_class.from_pretrained(args.load, torch_dtype="auto", device_map="cuda")
         print("Loading checkpoint from",args.load)
 
         possible_factorization = True
 
 if possible_factorization and args.factorization_rank > 0:
-    from peft import get_peft_model, LoraConfig
+    if load_adapter is not None:
+        files = glob(load_adapter+"/*")
+        if len(files) != 1:
+            print(files)
+            raise RuntimeError
+        model = PeftModel.from_pretrained(model, files[0])
+        model = model.merge_and_unload()
 
-    peft_config = LoraConfig(inference_mode=False, r=args.factorization_rank, lora_alpha=16, lora_dropout=0.1, bias="all", target_modules=["q_proj", "k_proj", "v_proj", "out_proj", "fc1", "fc2"])
-
-    if not args.factorization_only_decoder:
-        model = get_peft_model(model, peft_config)
-        model.print_trainable_parameters()
-    else:
-        for p in model.get_encoder().parameters():
-            p.requires_grad = False
-        model.model.decoder = get_peft_model(model.model.decoder, peft_config)
-        model.model.decoder.print_trainable_parameters()
-
-    """from model_factorization import FactorizationWrapper
-
-    if not args.factorization_only_decoder:
-        model = FactorizationWrapper(model, args.factorization_rank)
-    else:
-        for p in model.get_encoder().parameters():
-            p.requires_grad = False
-        model.model.decoder = FactorizationWrapper(model.model.decoder, args.factorization_rank)"""
+    model = add_lora(model, args.factorization_rank, args.factorization_only_decoder)
 
 print(f"Number of parameters: {sum(p.numel() for p in model.parameters())/1000000:.0f} M, number of trainable parameters: {sum(p.numel() for p in model.parameters() if p.requires_grad)/1000000:.0f} M")
 

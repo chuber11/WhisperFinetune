@@ -1,5 +1,6 @@
 
-model_name="bw"
+model_name="${2:-bw}"
+load="${3:-./saves/model7/checkpoint-7300}"
 dataset_factor=10000
 
 clear
@@ -21,7 +22,7 @@ if [ -e "$logfile" ] && [ "$1" != "-y" ]; then
 fi
 
 python -u train.py --model_path ./saves/model_$model_name \
-    --load ./saves/model7/checkpoint-7300 \
+    --load $load \
     --segfiles "../WhisperE+Phi2/data/cv.*.train.seg.aligned" "/project/OML/chuber/2023/data/earnings_nw_dataset/aligned_21/nw.dev.train.*.seg.aligned" "/project/OML/chuber/2023/data/earnings_nw_dataset/aligned_21/nw.test.train.*.seg.aligned" \
 	--dataset_factors 1 $dataset_factor $dataset_factor \
     --segfiles_dev "/project/OML/chuber/2023/data/earnings_nw_dataset/aligned_21/nw.dev.test.seg.aligned"\

@@ -218,6 +218,7 @@ class DataCollatorSpeechSeq2SeqWithPadding:
             memory["attention_mask"] = memory["attention_mask"][:,3:]
             
             memory_labels = torch.zeros_like(labels)
+            memory_labels[labels.eq(-100)] = -100
             index = 0
             for index2, feature in enumerate(features):
                 for word in feature["memory_words"]:

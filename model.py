@@ -114,8 +114,8 @@ class WhisperDecoderLayerMemory(WhisperDecoderLayer):
         encoder_output_memory, memory_text_enc, memory_text_mask = memory
 
         cross_attn_weights = self.memory_attn(hidden_states, encoder_output_memory) # b x l_tgt x (n_mem+1)
-        #if cross_attn_weights.argmax(-1).item() > 0:
-        #    print(cross_attn_weights,encoder_output_memory.shape)
+        #if cross_attn_weights.argmax(-1).gt(0).any():
+        #    print(cross_attn_weights.argmax(-1),encoder_output_memory.shape)
 
         hidden_states = self.calc_memory_entry_attn(dec_output=hidden_states,
                                                     mem_attn_out=cross_attn_weights,
@@ -524,9 +524,9 @@ def get_loss(logits, labels, mask, mean=False): # shapes L x N, L, L
     #if labels.max() >= logits.shape[1] or labels.min() < 0:
     #    breakpoint()
     if not mean:
-        return F.softmax(logits, -1).gather(1, labels.unsqueeze(-1))[:,0][mask].sum()
+        return -F.log_softmax(logits, -1).gather(1, labels.unsqueeze(-1))[:,0][mask].sum()
     else:
-        return F.softmax(logits, -1).gather(1, labels.unsqueeze(-1))[:,0][mask].mean()
+        return -F.log_softmax(logits, -1).gather(1, labels.unsqueeze(-1))[:,0][mask].mean()
 
 def add_loss(statistics, logits, labels, mask):
     loss = get_loss(logits, labels, mask)
@@ -611,31 +611,36 @@ class WhisperForConditionalGenerationMemoryWrapper(WhisperForConditionalGenerati
             output = (lm_logits,) + outputs[1:]
             return ((loss,) + output) if loss is not None else output
 
+        statistics = None
         if memory_labels is not None:
             factor_mem = 1e-1
 
             memory_labels = memory_labels.to(lm_logits.device).reshape(-1)
             mask = labels.ge(0)
+            mask_ = labels.lt(0)
 
             for cross_attn_weights in outputs.all_memory_cross_attentions:
                 cross_attn_weights = cross_attn_weights.view(-1, cross_attn_weights.shape[-1])
-                loss = loss + factor_mem*get_loss(cross_attn_weights, memory_labels, mask, mean=True) #loss_fct(cross_attn_weights, memory_labels)
+                loss = loss + factor_mem*loss_fct(cross_attn_weights, memory_labels)
+
+            labels_c = labels.clone()
+            labels_c[mask_] = 0
+            memory_labels_c = memory_labels.clone()
+            memory_labels_c[mask_] = 0
+            mask2 = mask & memory_labels_c.eq(0)
+            mask3 = mask & memory_labels_c.gt(0)
 
             statistics = []
 
             logits = lm_logits.view(-1, self.config.vocab_size).detach()
-            labels_c = labels.clone()
-            labels_c[labels_c.lt(0)] = 0
             add_loss(statistics, logits, labels_c, mask)
-            mask2 = mask & memory_labels.eq(0)
             add_loss(statistics, logits, labels_c, mask2)
-            mask3 = mask & memory_labels.gt(0)
             add_loss(statistics, logits, labels_c, mask3)
 
             logits2 = cross_attn_weights.detach()
-            add_loss(statistics, logits2, memory_labels, mask)
-            add_loss(statistics, logits2, memory_labels, mask2)
-            add_loss(statistics, logits2, memory_labels, mask3)
+            add_loss(statistics, logits2, memory_labels_c, mask)
+            add_loss(statistics, logits2, memory_labels_c, mask2)
+            add_loss(statistics, logits2, memory_labels_c, mask3)
 
             statistics = torch.stack(statistics)
 

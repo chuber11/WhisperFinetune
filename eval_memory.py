@@ -6,7 +6,8 @@ segfile = "/project/OML/chuber/2023/data/earnings_nw_dataset/aligned_21/nw.dev.t
 new_words = "/project/OML/chuber/2023/data/earnings_nw_dataset/aligned_21/nw.dev.test.new_words"
 references = "/project/OML/chuber/2023/data/earnings_nw_dataset/aligned_21/nw.dev.test.ref"
 
-correct = 0
+correct_nomem = 0
+correct_mem = 0
 total = 0
 
 for line,line2,line3 in zip(open(segfile),open(new_words),open(references)):
@@ -35,8 +36,11 @@ for line,line2,line3 in zip(open(segfile),open(new_words),open(references)):
     print("HYPONOMEM:",hypo_nomem)
     print("NEW WORD:",new_word,new_word in hypo_mem)
 
+    if new_word in hypo_nomem:
+        correct_nomem += 1
     if new_word in hypo_mem:
-        correct += 1
+        correct_mem += 1
     total += 1
 
-print(f"{100*correct/total:.1f}% recall")
+print(f"No mem: {100*correct_nomem/total:.1f}% recall")
+print(f"Mem:    {100*correct_mem/total:.1f}% recall")
