@@ -28,7 +28,7 @@ def replace_except_specified_chars(text):
     return result
 
 class MyDataset(Dataset):
-    def __init__(self, segfiles, dev=False, replace=None, max_len=2000, memory=False):
+    def __init__(self, segfiles, dev=False, replace=None, max_len=2000, memory=False, test=False):
         if replace is None:
             replace = [("/project/asr_systems/LT2021/EN/data","/export/data2/chuber/ASR/data/EN")]
 
@@ -41,27 +41,47 @@ class MyDataset(Dataset):
             labelfile = ".".join(segfile.split(".")[:-2])+".cased"
             if not os.path.isfile(labelfile):
                 labelfile = labelfile[:-len(".cased")]+".ref"
+            if not os.path.isfile(labelfile):
+                if not test:
+                    raise FileNotFoundError
+                labelfile = None
 
-            for line, line2 in zip(open(segfile),open(labelfile)):
-                line = line.strip().split()
-                self.ids.append(line[0])
-                audio_path = line[1]
-                for r in replace:
-                    audio_path = audio_path.replace(r[0],r[1])
-                self.audio_paths.append(audio_path)
-                if len(line) == 2:
-                    self.timestamps.append(None)
-                elif len(line) == 4:
-                    self.timestamps.append((float(line[2]),float(line[3])))
-                else:
-                    raise RuntimeError
-                lang = "<|en|>"
-                if "DE" in segfile:
-                    lang = "<|de|>"
-                self.labels.append(lang+line2.strip())
+            if labelfile is not None:
+                for line, line2 in zip(open(segfile),open(labelfile)):
+                    line = line.strip().split()
+                    self.ids.append(line[0])
+                    audio_path = line[1]
+                    for r in replace:
+                        audio_path = audio_path.replace(r[0],r[1])
+                    self.audio_paths.append(audio_path)
+                    if len(line) == 2:
+                        self.timestamps.append(None)
+                    elif len(line) == 4:
+                        self.timestamps.append((float(line[2]),float(line[3])))
+                    else:
+                        raise RuntimeError
+                    lang = "<|en|>"
+                    if "DE" in segfile:
+                        lang = "<|de|>"
+                    self.labels.append(lang+line2.strip())
+            else:
+                for line in open(segfile):
+                    line = line.strip().split()
+                    self.ids.append(line[0])
+                    audio_path = line[1]
+                    for r in replace:
+                        audio_path = audio_path.replace(r[0],r[1])
+                    self.audio_paths.append(audio_path)
+                    if len(line) == 2:
+                        self.timestamps.append(None)
+                    elif len(line) == 4:
+                        self.timestamps.append((float(line[2]),float(line[3])))
+                    else:
+                        raise RuntimeError
+                    self.labels.append(None)
 
-                #if len(self.audio_paths) >= 16*3:
-                #    break
+        if len(self.audio_paths) == 0:
+            raise FileNotFoundError
 
         random.seed(42)
 
@@ -73,9 +93,9 @@ class MyDataset(Dataset):
         if dev:
             self.len = min(max_len,self.len)
 
-        self.memory = memory
+        self.memory = memory and not test
 
-        if memory:
+        if self.memory:
             new_words_list = f"new_words_list_{segfiles.replace('/','_').replace('train','').replace('dev','')}.pt"
 
             if not dev and not os.path.isfile(new_words_list):
