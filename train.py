@@ -237,6 +237,7 @@ if possible_factorization and args.factorization_rank > 0:
             raise RuntimeError
         model = PeftModel.from_pretrained(model, files[0])
         model = model.merge_and_unload()
+        print("Loaded adapter from",files[0])
 
     model = add_lora(model, args.factorization_rank, args.factorization_only_decoder)
 

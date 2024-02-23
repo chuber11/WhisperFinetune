@@ -11,8 +11,6 @@ from dataclasses import dataclass
 from transformers import Wav2Vec2Processor
 from typing import Any, Dict, List, Union, Optional
 
-from datasets import load_metric
-
 import math
 import random
 
@@ -36,7 +34,12 @@ class MyDataset(Dataset):
         self.audio_paths = []
         self.timestamps = []
         self.labels = []
-        for segfile in glob(segfiles):
+
+        all_segfiles = glob(segfiles)
+        if len(all_segfiles) == 0 and os.path.isfile(segfiles):
+            all_segfiles = [segfiles]
+
+        for segfile in all_segfiles:
             print(segfile)
             labelfile = ".".join(segfile.split(".")[:-2])+".cased"
             if not os.path.isfile(labelfile):
@@ -80,14 +83,16 @@ class MyDataset(Dataset):
                         raise RuntimeError
                     self.labels.append(None)
 
-        if len(self.audio_paths) == 0:
+        if len(all_segfiles) == 0:
+            print(segfiles)
             raise FileNotFoundError
 
         random.seed(42)
 
-        combined_lists = list(zip(self.ids, self.audio_paths, self.timestamps, self.labels))
-        random.shuffle(combined_lists)
-        self.ids, self.audio_paths, self.timestamps, self.labels = zip(*combined_lists)
+        if not test and len(self.audio_paths) > 0:
+            combined_lists = list(zip(self.ids, self.audio_paths, self.timestamps, self.labels))
+            random.shuffle(combined_lists)
+            self.ids, self.audio_paths, self.timestamps, self.labels = zip(*combined_lists)
 
         self.len = len(self.audio_paths)
         if dev:
@@ -208,22 +213,27 @@ class DataCollatorSpeechSeq2SeqWithPadding:
     def __call__(self, features: List[Dict[str, Union[List[int], torch.Tensor]]],                 inference=False) -> Dict[str, torch.Tensor]:
 
         audio = torch.cat([self.processor(item["audio"], sampling_rate=16000,                     return_tensors="pt").input_features for item in features], dim=0)
-        text_labels = self.tokenizer([feature["labels"] for feature in features], return_tensors="pt", padding=True)
 
-        text_labels["input_ids"] = torch.cat([
-            text_labels["input_ids"][:,:1],
-            text_labels["input_ids"][:,3:4],
-            text_labels["input_ids"][:,1:3],
-            text_labels["input_ids"][:,4:]
-            ],1)
+        batch = {"input_features": audio}
 
-        input_ids = text_labels["input_ids"][:,:-1]
+        if features[0]["labels"] is not None:
+            text_labels = self.tokenizer([feature["labels"] for feature in features], return_tensors="pt", padding=True)
 
-        mask = text_labels["attention_mask"][:,1:]
-        labels = text_labels["input_ids"][:,1:].clone()
-        labels[mask.eq(0)] = -100
+            text_labels["input_ids"] = torch.cat([
+                text_labels["input_ids"][:,:1],
+                text_labels["input_ids"][:,3:4],
+                text_labels["input_ids"][:,1:3],
+                text_labels["input_ids"][:,4:]
+                ],1)
 
-        batch = {"input_features": audio, "decoder_input_ids":input_ids, "labels":labels}
+            input_ids = text_labels["input_ids"][:,:-1]
+
+            mask = text_labels["attention_mask"][:,1:]
+            labels = text_labels["input_ids"][:,1:].clone()
+            labels[mask.eq(0)] = -100
+
+            batch.update({"decoder_input_ids":input_ids, "labels":labels})
+
         if self.return_ids:
             batch["ids"] = [item["id"] for item in features]
 

@@ -15,6 +15,10 @@ from transformers.modeling_attn_mask_utils import _prepare_4d_causal_attention_m
 
 from transformers.models.mbart.modeling_mbart import MBartForConditionalGeneration
 
+import inspect
+from peft.tuners.tuners_utils import BaseTunerLayer
+from peft.utils import ModulesToSaveWrapper
+
 from dataclasses import dataclass
 
 from transformers.utils import logging
@@ -378,6 +382,7 @@ class Seq2SeqModelOutputMemory(Seq2SeqModelOutput):
 @dataclass
 class BaseModelOutputMemory(BaseModelOutput):
     memory: Optional[Tuple[torch.FloatTensor, ...]] = None
+    encoder_outputs_memory: Optional[Tuple[torch.FloatTensor, ...]] = None
 
 class WhisperModelMemory(WhisperModel):
     def __init__(self, config: WhisperConfig):
@@ -397,7 +402,7 @@ class WhisperModelMemory(WhisperModel):
         for p in self.decoder.parameters():
             p.requires_grad = False
 
-        self.two_decoders = False
+        self.two_decoders = True
 
         if not self.two_decoders:
             print("WARNING: Should there be used two decoders?")
@@ -419,6 +424,7 @@ class WhisperModelMemory(WhisperModel):
         output_attentions: Optional[bool] = None,
         output_hidden_states: Optional[bool] = None,
         return_dict: Optional[bool] = None,
+        encoder_outputs_memory: Optional[Tuple[Tuple[torch.FloatTensor]]] = None,
         memory = None,
     ) -> Union[Tuple[torch.Tensor], Seq2SeqModelOutputMemory]:
         output_attentions = output_attentions if output_attentions is not None else self.config.output_attentions
@@ -438,6 +444,7 @@ class WhisperModelMemory(WhisperModel):
                 output_hidden_states=output_hidden_states,
                 return_dict=return_dict,
             )
+            encoder_outputs_memory = encoder_outputs
 
             memory = self.encoder_memory(memory)
             #print("1) Encoded memory of size", len(memory[0])-1)
@@ -452,6 +459,12 @@ class WhisperModelMemory(WhisperModel):
 
         if "memory" in encoder_outputs and encoder_outputs.memory is not None:
             memory = encoder_outputs.memory
+
+        if encoder_outputs_memory is None:
+            if encoder_outputs.encoder_outputs_memory is None:
+                encoder_outputs_memory = encoder_outputs
+            else:
+                encoder_outputs_memory = encoder_outputs.encoder_outputs_memory
 
         if self.two_decoders:
             if past_key_values is None:
@@ -480,7 +493,7 @@ class WhisperModelMemory(WhisperModel):
         decoder_outputs_memory = self.decoder_memory(
             input_ids=decoder_input_ids,
             attention_mask=decoder_attention_mask,
-            encoder_hidden_states=encoder_outputs[0],
+            encoder_hidden_states=encoder_outputs_memory[0],
             head_mask=decoder_head_mask,
             cross_attn_head_mask=cross_attn_head_mask,
             past_key_values=past_key_values,
@@ -663,10 +676,35 @@ class WhisperForConditionalGenerationMemoryWrapper(WhisperForConditionalGenerati
         else:
             model_kwargs["encoder_outputs"] = model_kwargs["encoder_outputs_memory"]
             del model_kwargs["encoder_outputs_memory"]
+        encoder_outputs_memory = None
+        if hasattr(self.model.encoder.layers[0].self_attn.k_proj,"lora_A"): # LORA -> have to run encoder without lora weights
+            encoder = self.get_encoder()
+            irrelevant_prefix = ["decoder_", "cross_attn", "use_cache"]
+            encoder_kwargs = {
+                argument: value
+                for argument, value in model_kwargs.items()
+                if not any(argument.startswith(p) for p in irrelevant_prefix)
+            }
+            encoder_signature = set(inspect.signature(encoder.forward).parameters)
+            encoder_accepts_wildcard = "kwargs" in encoder_signature or "model_kwargs" in encoder_signature
+            if not encoder_accepts_wildcard:
+                encoder_kwargs = {
+                    argument: value for argument, value in encoder_kwargs.items() if argument in encoder_signature
+                }
+            model_input_name = model_input_name if model_input_name is not None else self.main_input_name
+            encoder_kwargs["return_dict"] = True
+            encoder_kwargs[model_input_name] = inputs_tensor
+            for name, module in encoder.named_modules():
+                if isinstance(module, (BaseTunerLayer, ModulesToSaveWrapper)):
+                    module.enable_adapters(enabled=False)
+            encoder_outputs_memory = encoder(**encoder_kwargs)
+            for name, module in encoder.named_modules():
+                if isinstance(module, (BaseTunerLayer, ModulesToSaveWrapper)):
+                    module.enable_adapters(enabled=True)
         memory = model_kwargs["memory"] if "memory" in model_kwargs else None
         memory = self.model.encoder_memory(memory)
         print("2) Encoded memory of size", len(memory[0])-1)
-        model_kwargs["encoder_outputs"] = BaseModelOutputMemory(*model_kwargs["encoder_outputs"].values(),memory=memory)
+        model_kwargs["encoder_outputs"] = BaseModelOutputMemory(*model_kwargs["encoder_outputs"].values(),memory=memory, encoder_outputs_memory=encoder_outputs_memory)
         #print(model_kwargs["encoder_outputs"])
         return model_kwargs
         
