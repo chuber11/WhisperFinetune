@@ -32,9 +32,9 @@ for j,talk_ in enumerate(open(datadir+"/order.txt")):
         new_words.add(line.strip())
 
 # Count the number new words already occured to later split between train and dev sets
-new_word_to_number_occ_train = Counter()
-new_word_to_number_occ_dev = Counter()
-for split, counter in zip(["train","dev"],[new_word_to_number_occ_train,new_word_to_number_occ_dev]):
+counters = {"train":Counter(), "dev":Counter()}
+for split in ["train","dev"]:
+    counter = counters[split]
     for file in glob(f"{experimentdir}/data/*.{split}.new_words"):
         for line in open(file):
             new_words = line.strip().split("|")
@@ -62,10 +62,13 @@ for line,line2 in zip(open(f"{datadir}/segfiles/{talk}.seg.aligned"),open(f"{exp
         continue
 
     split = "train"
-    if all(w in new_word_to_number_occ_train for w in found_new_words) and not all(w in new_word_to_number_occ_dev for w in found_new_words):
+    if all(w in counters["train"] for w in found_new_words) and not all(w in counters["dev"] for w in found_new_words):
         split = "dev"
 
     outfiles[(split,"seg.aligned")].write(line)
     outfiles[(split,"ref")].write(hypo+"\n")
     outfiles[(split,"new_words")].write("|".join(found_new_words)+"\n")
+
+    for w in found_new_words:
+        counters[split][w] += 1
 
