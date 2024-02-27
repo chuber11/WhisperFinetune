@@ -224,8 +224,11 @@ else:
                 raise RuntimeError
             load_adapter = args.load
             args.load = json.load(open(files[0]))["base_model_name_or_path"]
-        model = model_class.from_pretrained(args.load, torch_dtype="auto", device_map="cuda")
-        print("Loading checkpoint from",args.load)
+        elif len(files) != 1:
+            breakpoint()
+        checkpoint = "/".join(files[0].split("/")[:-1])
+        print("Loading checkpoint from",checkpoint)
+        model = model_class.from_pretrained(checkpoint, torch_dtype="auto", device_map="cuda")
 
         possible_factorization = True
 

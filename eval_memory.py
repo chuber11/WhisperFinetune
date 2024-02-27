@@ -2,9 +2,11 @@
 import requests
 import json
 
-segfile = "/project/OML/chuber/2023/data/earnings_nw_dataset/aligned_21/nw.dev.test.seg.aligned"
-new_words = "/project/OML/chuber/2023/data/earnings_nw_dataset/aligned_21/nw.dev.test.new_words"
-references = "/project/OML/chuber/2023/data/earnings_nw_dataset/aligned_21/nw.dev.test.ref"
+split = "test"
+
+segfile = "/project/OML/chuber/2023/data/earnings_nw_dataset/aligned_21/nw."+split+".test.seg.aligned"
+new_words = "/project/OML/chuber/2023/data/earnings_nw_dataset/aligned_21/nw."+split+".test.new_words"
+references = "/project/OML/chuber/2023/data/earnings_nw_dataset/aligned_21/nw."+split+".test.ref"
 
 correct_nomem = 0
 correct_mem = 0
@@ -20,7 +22,7 @@ for line,line2,line3 in zip(open(segfile),open(new_words),open(references)):
     start = float(line[2])
     end = float(line[3])
 
-    wav_ = wav[int(32000*start):int(32000*end)]
+    wav_ = wav[int(16000*start)*2:int(16000*end)*2]
 
     memory = [w for w in new_word.split()]
     print("MEMORY:",memory)

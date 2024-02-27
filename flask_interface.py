@@ -33,8 +33,8 @@ def initialize_model():
 
     processor.get_decoder_prompt_ids(language="en", task="transcribe") # WARNING: Changes state of processor
     
-    #model_path = "saves/model_newwords/checkpoint-99000"
-    model_path = "saves/model_newwords2/checkpoint-27000"
+    #model_path = "saves/model_newwords6/checkpoint-26000"
+    model_path = "saves/model_newwords7/checkpoint-24000"
     model = WhisperForConditionalGenerationMemory.from_pretrained(model_path)
     
     print("ASR initialized")
@@ -62,8 +62,8 @@ def infer_batch(audio_wavs, prefix="", input_language="en", task="transcribe", a
         memory = processor.tokenizer(memory_words, return_tensors="pt", padding=True)
         memory["input_ids"] = memory["input_ids"][:,4:].to(device)
         memory["attention_mask"] = memory["attention_mask"][:,4:].to(device)
-        print([[processor.tokenizer.decode(i) for i in memory["input_ids"][j]] for j in range(len(memory["input_ids"]))])
-        print(memory["attention_mask"])
+        #print([[processor.tokenizer.decode(i) for i in memory["input_ids"][j]] for j in range(len(memory["input_ids"]))])
+        #print(memory["attention_mask"])
     else:
         memory = None
     
@@ -105,6 +105,7 @@ def infer_batch(audio_wavs, prefix="", input_language="en", task="transcribe", a
 
             predicted_ids2 = model.generate(
                 input_values[indices], 
+                num_beams=4,
                 forced_decoder_ids=forced_decoder_ids,
                 no_repeat_ngram_size=6,
                 encoder_outputs_memory=encoder_outputs,
@@ -117,12 +118,13 @@ def infer_batch(audio_wavs, prefix="", input_language="en", task="transcribe", a
 
     predicted_ids = model.generate(
         input_values, 
+        num_beams=4,
         forced_decoder_ids=forced_decoder_ids,
         no_repeat_ngram_size=6,
         memory=memory,
     )
 
-    #print([(processor.tokenizer.decode(i),i.item()) for i in predicted_ids[0]])
+    print([(processor.tokenizer.decode(i),i.item()) for i in predicted_ids[0]])
 
     text_output_raw = processor.batch_decode(predicted_ids, skip_special_tokens=True)
     return text_output_raw

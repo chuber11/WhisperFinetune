@@ -28,7 +28,7 @@ parser.add_argument('--memory_file', type=str)
 parser.add_argument('--model_name', type=str, help='Model architecture to train', default="openai/whisper-large-v2")
 parser.add_argument('--hypo_file', type=str, help='Where to write the hypo')
 parser.add_argument('--num_beams', type=int, default=4)
-parser.add_argument('--load_adapter_model', type=str, help='Load adapter weights for baseline weights') #, default="./saves/model_bw/checkpoint-290")
+parser.add_argument('--load_adapter_model', type=str, help='Load adapter weights for baseline weights', default=None)
 parser.add_argument('--batch_size', type=int, default=4)
 parser.add_argument('--no_write_at_end', action="store_true")
 
@@ -58,6 +58,7 @@ data_collator = DataCollatorSpeechSeq2SeqWithPadding(processor=processor, tokeni
 
 if not args.use_memory:
     model_class = WhisperForConditionalGeneration
+    memory = None
 else:
     model_class = WhisperForConditionalGenerationMemory
 
@@ -75,6 +76,13 @@ model = model_class.from_pretrained(args.model_path, torch_dtype="auto", device_
 
 if args.load_adapter_model is not None:
     model = PeftModel.from_pretrained(model, args.load_adapter_model)
+
+tokenizer = WhisperTokenizerFast.from_pretrained(args.model_name)
+tokenizer.set_prefix_tokens(language="english", task="transcribe")
+
+processor = WhisperProcessor.from_pretrained(args.model_name)
+
+data_collator = DataCollatorSpeechSeq2SeqWithPadding(processor=processor, tokenizer=tokenizer, return_ids=True)
 
 batch_size = args.batch_size
 

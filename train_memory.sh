@@ -20,11 +20,12 @@ if [ -e "$logfile" ] && [ "$1" != "-y" ]; then
 fi
 
 python -u train.py --model_path ./saves/model_$model_name \
+    --load saves/model_newwords6_ \
     --use_memory \
-    --warmup_steps 500 --learning_rate 2e-4 \
+    --warmup_steps 500 --learning_rate 1e-4 \
     --log_steps 10 \
     --eval_steps 1000 --use_early_stopping 100 \
     `#--gradient_checkpointing` \
-    --batch_size 16 --gradient_accumulation_steps 2 \
+    --batch_size 8 --gradient_accumulation_steps 4 \
     | tee -a $logfile
 

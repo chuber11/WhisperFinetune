@@ -115,7 +115,7 @@ class WhisperDecoderLayerMemory(WhisperDecoderLayer):
 
         hidden_states = self.memory_layer_norm(hidden_states)
 
-        encoder_output_memory, memory_text_enc, memory_text_mask = memory
+        encoder_output_memory, memory_text_enc, memory_text_embeds, memory_text_mask = memory
 
         cross_attn_weights = self.memory_attn(hidden_states, encoder_output_memory) # b x l_tgt x (n_mem+1)
         #if cross_attn_weights.argmax(-1).gt(0).any():
@@ -123,7 +123,7 @@ class WhisperDecoderLayerMemory(WhisperDecoderLayer):
 
         hidden_states = self.calc_memory_entry_attn(dec_output=hidden_states,
                                                     mem_attn_out=cross_attn_weights,
-                                                    memory_text_enc=memory_text_enc,
+                                                    memory_text_enc=memory_text_embeds,
                                                     memory_text_mask=memory_text_mask)
 
         if hidden_states is not None:
@@ -348,15 +348,15 @@ class EncoderMemory(nn.Module):
 
     def forward(self, memory):
         if memory is None:
-            return self.no_entry_found, None, None
+            return self.no_entry_found, None, None, None
 
         memory_text_embeds, memory_text_mask = self.decoder[0].embed_tokens(memory["input_ids"]), memory["attention_mask"]
         if self.linear is not None:
-            memory_text_embeds = 3 * self.linear(memory_text_embeds)
+            memory_text_embeds_ = 3 * self.linear(memory_text_embeds)
 
         lengths = memory_text_mask.eq(1).sum(1).unsqueeze(1) # n_mem x 1
 
-        memory_text_enc = self.model(inputs_embeds=memory_text_embeds, attention_mask=memory_text_mask)[0] # n_mem x l_mem x d_model
+        memory_text_enc = self.model(inputs_embeds=memory_text_embeds_, attention_mask=memory_text_mask)[0] # n_mem x l_mem x d_model
 
         if self.linear2 is not None:
             memory_text_enc = self.linear2(memory_text_enc)
@@ -373,7 +373,7 @@ class EncoderMemory(nn.Module):
 
         encoder_output_memory = torch.cat([self.no_entry_found, encoder_output_memory_wonef],0) # (n_mem+1) x d_model
 
-        return encoder_output_memory, memory_text_enc, memory_text_mask
+        return encoder_output_memory, memory_text_enc, memory_text_embeds, memory_text_mask
 
 @dataclass
 class Seq2SeqModelOutputMemory(Seq2SeqModelOutput):
