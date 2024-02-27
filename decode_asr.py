@@ -110,7 +110,7 @@ for i in tqdm(range(0,len(dataset),batch_size)):
         else:
             f.write(id+" "+t+"\n")
 
-if args.no_write_at_end:
+if not args.no_write_at_end:
     with open(outputfile, "w") as f:
         for o in outputs:
             f.write(o)
