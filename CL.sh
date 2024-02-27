@@ -2,9 +2,12 @@
 clear
 
 set -x
+set -e
+set -u
 
 experiment_name="${1:-cl1}"
-factorization_rank="${2:-16}"
+factorization_rank="${2:-4}"
+dataset_factor="${3:-10000}"
 news_data_dir="/export/data1/chuber/2024/NewsData"
 
 mkdir -p CL/$experiment_name/hypos
@@ -13,7 +16,7 @@ mkdir -p CL/$experiment_name/data
 
 i=0
 
-adapter_model="./saves/model_cl_start"
+adapter_model="./saves/model7_adaptNW"
 
 while IFS= read -r line; do
     talk=`echo $line | cut -d" " -f1`
@@ -26,7 +29,8 @@ while IFS= read -r line; do
     # Decode talk
     if [ ! -e "$hypofile" ]; then
         echo Decoding $segfile
-        python decode_asr.py --segfiles $segfile --use_memory --memory_file $memory_file --hypo_file $hypofile --load_adapter_model $adapter_model --batch_size 2
+        adapter_model_checkpoint=`ls -d $adapter_model/*`
+        python decode_asr.py --model_path "./saves/model_newwords7/checkpoint-24000" --segfiles $segfile --use_memory --memory_file $memory_file --hypo_file $hypofile --load_adapter_model $adapter_model_checkpoint --batch_size 1 --num_beams 4
     fi
 
     # Generate pseudolabel data files
@@ -45,7 +49,7 @@ while IFS= read -r line; do
                 --dataset_factors 1 $dataset_factor $dataset_factor $dataset_factor \
                 --segfiles_dev "/project/OML/chuber/2023/data/earnings_nw_dataset/aligned_21/nw.dev.test.seg.aligned" "CL/$experiment_name/data/*.dev.seg.aligned" \
                 --warmup_steps 0 --learning_rate 1e-5 \
-                --log_steps 10 \
+                --log_steps 10 --use_early_stopping 2 \
                 --eval_steps 10 \
                 `#--gradient_checkpointing` \
                 --factorization_rank $factorization_rank `#--factorization_only_decoder` \
@@ -56,7 +60,5 @@ while IFS= read -r line; do
     fi
 
     i=$(($i+1))
-
-    break
 done < "$news_data_dir/order.txt"
 

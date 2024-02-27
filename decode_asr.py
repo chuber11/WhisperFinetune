@@ -30,6 +30,7 @@ parser.add_argument('--hypo_file', type=str, help='Where to write the hypo')
 parser.add_argument('--num_beams', type=int, default=4)
 parser.add_argument('--load_adapter_model', type=str, help='Load adapter weights for baseline weights') #, default="./saves/model_bw/checkpoint-290")
 parser.add_argument('--batch_size', type=int, default=4)
+parser.add_argument('--no_write_at_end', action="store_true")
 
 args = parser.parse_args()
 
@@ -79,18 +80,30 @@ batch_size = args.batch_size
 
 forced_decoder_ids = processor.get_decoder_prompt_ids(language="english", task="transcribe")
 
-with open(outputfile, "w") as f:
-    for i in tqdm(range(0,len(dataset),batch_size)):
-        data = data_collator([dataset[j] for j in range(i,min(len(dataset),i+batch_size))],inference=False)
-        ids = data.pop("ids")
+if not args.no_write_at_end:
+    outputs = []
+else:
+    f = open(outputfile, "w")
 
-        with torch.no_grad():
-            input_features = data["input_features"].cuda()
-            transcript = model.generate(input_features, forced_decoder_ids=forced_decoder_ids, no_repeat_ngram_size=6, num_beams=args.num_beams, memory=memory)
-        transcript = tokenizer.batch_decode(transcript, skip_special_tokens=True)
+for i in tqdm(range(0,len(dataset),batch_size)):
+    data = data_collator([dataset[j] for j in range(i,min(len(dataset),i+batch_size))],inference=False)
+    ids = data.pop("ids")
 
-        for t,id in zip(transcript, ids):
-            print(id,t)
-            t = t.replace("\n"," ")
+    with torch.no_grad():
+        input_features = data["input_features"].cuda()
+        transcript = model.generate(input_features, forced_decoder_ids=forced_decoder_ids, no_repeat_ngram_size=6, num_beams=args.num_beams, memory=memory)
+    transcript = tokenizer.batch_decode(transcript, skip_special_tokens=True)
+
+    for t,id in zip(transcript, ids):
+        print(id,t)
+        t = t.replace("\n"," ")
+        if not args.no_write_at_end:
+            outputs.append(id+" "+t+"\n")
+        else:
             f.write(id+" "+t+"\n")
+
+if args.no_write_at_end:
+    with open(outputfile, "w") as f:
+        for o in outputs:
+            f.write(o)
 
