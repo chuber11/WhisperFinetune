@@ -8,7 +8,7 @@ set -u
 experiment_name="${1:-cl1}"
 factorization_rank="${2:-4}"
 dataset_factor="${3:-10000}"
-news_data_dir="/export/data1/chuber/2024/NewsData"
+news_data_dir="/export/data2/chuber/2024/NewsData"
 
 mkdir -p CL/$experiment_name/hypos
 mkdir -p CL/$experiment_name/models
@@ -30,7 +30,7 @@ while IFS= read -r line; do
     if [ ! -e "$hypofile" ]; then
         echo Decoding $segfile
         adapter_model_checkpoint=`ls -d $adapter_model/*`
-        python decode_asr.py --model_path "./saves/model_newwords7/checkpoint-24000" --segfiles $segfile --use_memory --memory_file $memory_file --hypo_file $hypofile --load_adapter_model $adapter_model_checkpoint --batch_size 1 --num_beams 4
+        python decode_asr.py --model_path "./saves/model_newwords7/checkpoint-24000" --segfiles $segfile --use_memory --memory_file $memory_file --hypo_file $hypofile --load_adapter_model $adapter_model_checkpoint --batch_size 4 --num_beams 4
     fi
 
     # Generate pseudolabel data files
@@ -53,7 +53,7 @@ while IFS= read -r line; do
                 --eval_steps 10 \
                 `#--gradient_checkpointing` \
                 --factorization_rank $factorization_rank `#--factorization_only_decoder` \
-                --batch_size 2 --gradient_accumulation_steps 16 
+                --batch_size 4 --gradient_accumulation_steps 8 
         fi
 
         adapter_model=CL/$experiment_name/models/model_$i

@@ -6,3 +6,16 @@ logs/*
 saves/*
 *.pt
 README.txt
+CL/*
+NumbersTrainingset
+audio
+data
+data_test
+data_filtered
+data_filtered_test
+data_numbers
+data_numbers_human
+scripts
+speech-datasets
+data_impairedSpeech
+convert_hypos/outputs_convert.pt

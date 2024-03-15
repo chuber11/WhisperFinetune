@@ -31,6 +31,7 @@ parser.add_argument('--num_beams', type=int, default=4)
 parser.add_argument('--load_adapter_model', type=str, help='Load adapter weights for baseline weights', default=None)
 parser.add_argument('--batch_size', type=int, default=4)
 parser.add_argument('--no_write_at_end', action="store_true")
+parser.add_argument('--language', type=str, default="english")
 
 args = parser.parse_args()
 
@@ -41,16 +42,16 @@ print(args)
 
 outputfile = args.hypo_file
 if os.path.isfile(outputfile):
-    print("Output file already exists, continue?")
+    print(f"Output {outputfile} file already exists, continue?")
     breakpoint()
 
 if len(args.segfiles) == 1:
-    dataset = MyDataset(args.segfiles[0], test=True)
+    dataset = MyDataset(args.segfiles[0], test=True, dev=args.decode_only_first_part)
 else:
-    dataset = ConcatDataset([MyDataset(s, test=True) for s in args.segfiles])
+    dataset = ConcatDataset([MyDataset(s, test=True, dev=args.decode_only_first_part) for s in args.segfiles])
 
 tokenizer = WhisperTokenizerFast.from_pretrained(args.model_name)
-tokenizer.set_prefix_tokens(language="english", task="transcribe")
+tokenizer.set_prefix_tokens(language=args.language, task="transcribe")
 
 processor = WhisperProcessor.from_pretrained(args.model_name)
 
@@ -77,8 +78,16 @@ model = model_class.from_pretrained(args.model_path, torch_dtype="auto", device_
 if args.load_adapter_model is not None:
     model = PeftModel.from_pretrained(model, args.load_adapter_model)
 
+embeddings = glob(args.load_adapter_model+"/embedding.pt")
+if len(embeddings) == 1:
+    embedding = torch.load(embeddings[0])
+    model.base_model.load_state_dict(embedding, strict=False)
+    print("Loaded other embedding")
+elif len(embeddings) > 0:
+    breakpoint()
+
 tokenizer = WhisperTokenizerFast.from_pretrained(args.model_name)
-tokenizer.set_prefix_tokens(language="english", task="transcribe")
+tokenizer.set_prefix_tokens(language=args.language, task="transcribe")
 
 processor = WhisperProcessor.from_pretrained(args.model_name)
 
@@ -86,7 +95,7 @@ data_collator = DataCollatorSpeechSeq2SeqWithPadding(processor=processor, tokeni
 
 batch_size = args.batch_size
 
-forced_decoder_ids = processor.get_decoder_prompt_ids(language="english", task="transcribe")
+forced_decoder_ids = processor.get_decoder_prompt_ids(language=args.language, task="transcribe")
 
 if not args.no_write_at_end:
     outputs = []
@@ -99,6 +108,7 @@ for i in tqdm(range(0,len(dataset),batch_size)):
 
     with torch.no_grad():
         input_features = data["input_features"].cuda()
+        model.generation_config.suppress_tokens = [t for t in model.generation_config.suppress_tokens if t!=25] # allow for : to be decoded
         transcript = model.generate(input_features, forced_decoder_ids=forced_decoder_ids, no_repeat_ngram_size=6, num_beams=args.num_beams, memory=memory)
     transcript = tokenizer.batch_decode(transcript, skip_special_tokens=True)
 

@@ -27,5 +27,6 @@ python -u train.py --model_path ./saves/model_$model_name \
     --eval_steps 1000 --use_early_stopping 100 \
     `#--gradient_checkpointing` \
     --batch_size 8 --gradient_accumulation_steps 4 \
+    --metric_for_best_model acc_ntp_mem --greater_is_better \
     | tee -a $logfile
 
