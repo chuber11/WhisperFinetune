@@ -131,16 +131,15 @@ class MyCallback(TrainerCallback):
             pass #control.should_evaluate = True
 
 def add_lora(model, factorization_rank, factorization_only_decoder):
-    peft_config = LoraConfig(inference_mode=False, r=factorization_rank, lora_alpha=16, lora_dropout=0.1, bias="all", target_modules=["q_proj", "k_proj", "v_proj", "out_proj", "fc1", "fc2"])
-
     if not factorization_only_decoder:
-        model = get_peft_model(model, peft_config)
-        model.print_trainable_parameters()
+        peft_config = LoraConfig(inference_mode=False, r=factorization_rank, lora_alpha=16, lora_dropout=0.1, bias="all", target_modules=["q_proj", "k_proj", "v_proj", "out_proj", "fc1", "fc2"])
     else:
         for p in model.get_encoder().parameters():
             p.requires_grad = False
-        model.model.decoder = get_peft_model(model.model.decoder, peft_config)
-        model.model.decoder.print_trainable_parameters()
+        names = [".".join(n.split(".")[:-1]) for n,p in model.named_parameters() if "decoder" in n and not "layer_norm" in n and not "embed" in n]
+        peft_config = LoraConfig(inference_mode=False, r=factorization_rank, lora_alpha=16, lora_dropout=0.1, bias="all", target_modules=names)
+    model = get_peft_model(model, peft_config)
+    model.print_trainable_parameters()
     return model
 
 import argparse
@@ -170,7 +169,8 @@ parser.add_argument('--warmup_steps', type=int, help='Warmup steps', default=500
 parser.add_argument('--metric_for_best_model', type=str, help='Which metric to use to determine the best model', default="loss")
 parser.add_argument('--greater_is_better', action="store_true", help='If higher metric is better')
 parser.add_argument('--only_train_embedding', action="store_true", help='Freeze all weights except the projection layer / embedding layer')
-parser.add_argument('--train_embedding', action="store_true", help='Freeze all weights except the projection layer / embedding layer')
+parser.add_argument('--train_embedding', action="store_true", help='Train embedding / proj layer weights')
+parser.add_argument('--freeze_encoder', action="store_true", help='Freeze the encoder parameters')
 
 args = parser.parse_args()
 print(args)
@@ -267,6 +267,10 @@ if args.only_train_embedding or args.train_embedding:
 
     if factorization:
         model.save_embedding_separate = True
+
+if args.freeze_encoder:
+    for p in model.get_encoder().parameters():
+        p.requires_grad = False
 
 print(f"Number of parameters: {sum(p.numel() for p in model.parameters())/1000000:.0f} M, number of trainable parameters: {sum(p.numel() for p in model.parameters() if p.requires_grad)/1000000:.0f} M")
 

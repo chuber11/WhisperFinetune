@@ -41,9 +41,9 @@ if args.hypo_file is None:
 print(args)
 
 outputfile = args.hypo_file
-if os.path.isfile(outputfile):
-    print(f"Output {outputfile} file already exists, continue?")
-    breakpoint()
+if os.path.isfile(outputfile) and os.path.getsize(outputfile) > 0:
+    print(f"Output {outputfile} file already exists, exiting!")
+    sys.exit()
 
 if len(args.segfiles) == 1:
     dataset = MyDataset(args.segfiles[0], test=True, dev=args.decode_only_first_part)
@@ -76,15 +76,18 @@ else:
 model = model_class.from_pretrained(args.model_path, torch_dtype="auto", device_map="cuda")
 
 if args.load_adapter_model is not None:
-    model = PeftModel.from_pretrained(model, args.load_adapter_model)
+    embeddings = glob(args.load_adapter_model+"/embedding.pt")
+    if len(embeddings) == 1:
+        embedding = torch.load(embeddings[0])
+        embedding = {k[len("model."):]:v for k,v in embedding.items()}
+        model.load_state_dict(embedding, strict=False)
+        print("Loaded other embedding")
+    elif len(embeddings) > 0:
+        breakpoint()
 
-embeddings = glob(args.load_adapter_model+"/embedding.pt")
-if len(embeddings) == 1:
-    embedding = torch.load(embeddings[0])
-    model.base_model.load_state_dict(embedding, strict=False)
-    print("Loaded other embedding")
-elif len(embeddings) > 0:
-    breakpoint()
+if args.load_adapter_model is not None:
+    model = PeftModel.from_pretrained(model, args.load_adapter_model)
+    model = model.merge_and_unload()
 
 tokenizer = WhisperTokenizerFast.from_pretrained(args.model_name)
 tokenizer.set_prefix_tokens(language=args.language, task="transcribe")

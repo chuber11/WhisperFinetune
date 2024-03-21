@@ -30,7 +30,7 @@ while IFS= read -r line; do
     if [ ! -e "$hypofile" ]; then
         echo Decoding $segfile
         adapter_model_checkpoint=`ls -d $adapter_model/*`
-        python decode_asr.py --model_path "./saves/model_newwords7/checkpoint-24000" --segfiles $segfile --use_memory --memory_file $memory_file --hypo_file $hypofile --load_adapter_model $adapter_model_checkpoint --batch_size 4 --num_beams 4
+        python decode_asr.py --model_path "./saves/model_newwords7/checkpoint-158000" --segfiles $segfile --use_memory --memory_file $memory_file --hypo_file $hypofile --load_adapter_model $adapter_model_checkpoint --batch_size 4 --num_beams 4
     fi
 
     # Generate pseudolabel data files
