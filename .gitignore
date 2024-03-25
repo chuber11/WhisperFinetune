@@ -19,3 +19,5 @@ scripts
 speech-datasets
 data_impairedSpeech
 convert_hypos/outputs_convert.pt
+scores/*
+all_number_scores.txt

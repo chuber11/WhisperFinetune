@@ -8,11 +8,60 @@ if [ $GPU -eq 0 ]; then
         "0 0 0 0 1e-4 0"
         "0 0 1 0 1e-4 0"
         "0 0 2 0 1e-4 0"
+        "0 0 0 0 1e-5 0"
+        "0 0 1 0 1e-5 0"
+        "0 0 2 0 1e-5 0"
+        "0 0 0 0 1e-6 0"
+        "0 0 1 0 1e-6 0"
+        "0 0 2 0 1e-6 0"
+        "0 16 0 0 1e-4 0"
+        "0 16 1 0 1e-4 0"
+        "0 16 0 0 1e-5 0"
+        "0 16 1 0 1e-5 0"
+        "0 16 0 0 1e-6 0"
+        "0 16 1 0 1e-6 0"
     )
-else
+elif [ $GPU -eq 1 ]; then
     all_args=(
         "0 16 0 0 1e-4 1"
         "0 16 1 0 1e-4 1"
+        "0 16 0 0 1e-5 1"
+        "0 16 1 0 1e-5 1"
+        "0 16 0 0 1e-6 1"
+        "0 16 1 0 1e-6 1"
+        "0 1 0 0 1e-4 1"
+        "0 1 1 0 1e-4 1"
+        "0 1 0 0 1e-5 1"
+        "0 1 1 0 1e-5 1"
+        "0 1 0 0 1e-6 1"
+        "0 1 1 0 1e-6 1"
+        "0 1 0 0 1e-4 0"
+        "0 1 1 0 1e-4 0"
+        "0 1 0 0 1e-5 0"
+        "0 1 1 0 1e-5 0"
+        "0 1 0 0 1e-6 0"
+        "0 1 1 0 1e-6 0"
+    )
+else
+    all_args=(
+        "1 0 0 0 1e-6 0" # 0,15 %
+        "1 0 1 0 1e-6 0"
+        "1 0 2 0 1e-6 0"
+        "75 0 0 0 1e-6 0" # 10 %
+        "75 0 1 0 1e-6 0"
+        "75 0 2 0 1e-6 0"
+        "670 0 0 0 1e-6 0" # 50 %
+        "670 0 1 0 1e-6 0"
+        "670 0 2 0 1e-6 0"
+        "1 0 0 0 1e-5 0" # 0,15 %
+        "1 0 1 0 1e-5 0"
+        "1 0 2 0 1e-5 0"
+        "75 0 0 0 1e-5 0" # 10 %
+        "75 0 1 0 1e-5 0"
+        "75 0 2 0 1e-5 0"
+        "670 0 0 0 1e-5 0" # 50 %
+        "670 0 1 0 1e-5 0"
+        "670 0 2 0 1e-5 0"
     )
 fi
 
@@ -28,10 +77,9 @@ if [ ! -e "logs/log_$model_name.txt" ]; then
     bash train_numbers.sh $args 
 fi
 
-checkpoint=`ls -d saves/model_$model_name/checkpoint-*`
+checkpoint=`ls -d saves/model_$model_name/checkpoint-* | head -n1`
 pattern=`echo hypo_$checkpoint/* | sed "s/\//_/g"`
-#file_count=`ls hypos/$pattern | wc -l`
-file_count=`find hypos/$pattern -type f -size +0c -exec basename {} \; | wc -l`
+file_count=`find hypos/$pattern -type f -size +0c -exec  basename {} \; 2>/dev/null | wc -l`
 
 if [ $file_count -lt 6 ]; then
     if [ $factorization -eq 0 ]; then
@@ -64,7 +112,7 @@ if [ ! -e $outfile ]; then
 fi
 
 file=`ls hypos/$pattern | grep -v cv | grep -v human | grep EN | sed 's/EN/*/g'`
-outfile=scores/${file:11:-12}.score
+outfile=scores/${file:11:-6}.score
 if [ ! -e $outfile ]; then
     python eval_numbers.py "$file" test > $outfile
 fi

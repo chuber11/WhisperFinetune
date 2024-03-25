@@ -13,7 +13,7 @@ args=""
 if [ $batch_weighting -eq 0 ]; then
     args+=" --segfiles data_numbers/llm_augment.*.train.seg.aligned"
 else
-    args+=" --segfiles \"data/cv.*.train.seg.aligned\" \"data_numbers/llm_augment.*.train.seg.aligned\" --dataset_factors 1 $batch_weighting"
+    args+=" --segfiles data_filtered/cv_filtered.*.train.seg.aligned data_numbers/llm_augment.*.train.seg.aligned --dataset_factors 1 $batch_weighting"
 fi
 
 if [ $factorization -gt 0 ]; then
