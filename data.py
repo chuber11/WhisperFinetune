@@ -20,7 +20,7 @@ from tqdm import tqdm
 
 def replace_except_specified_chars(text):
     # This pattern matches any character that is NOT a-z, A-Z, äöüÄÖÜß
-    pattern = r'[^a-zA-ZäöüÄÖÜß]'
+    pattern = r'[^a-zA-ZäöüÄÖÜß\'–—’&]'
     # Replace these matched characters with a space
     result = re.sub(r'\s+', ' ', re.sub(pattern, ' ', text))
     return result
@@ -106,6 +106,13 @@ class MyDataset(Dataset):
             if not dev and not os.path.isfile(new_words_list):
                 from collections import Counter
 
+                """occ = Counter()
+                for label in tqdm(self.labels):
+                    for c in label.strip():
+                        occ[c] += 1
+                print(sorted(occ.items(),key=lambda x:-x[1]))
+                breakpoint()"""
+
                 occ = Counter()
                 for label in tqdm(self.labels):
                     words = replace_except_specified_chars(label[len("<|en|>"):]).split()
@@ -116,7 +123,7 @@ class MyDataset(Dataset):
                     tmp = [k for k,v in occ.items() if v==i]
                     print(i,len(tmp),tmp[:20])"""
 
-                new_words = set(k for k,v in occ.items() if v<=10)
+                new_words = set(k for k,v in occ.items()) # if v<=10)
 
                 torch.save(new_words, new_words_list)
 
@@ -173,6 +180,9 @@ class ConcatDataset(Dataset):
                 total_length += len(dataset)
                 cumulative_lengths.append(total_length)
         else:
+            if len(datasets) != len(factors):
+                raise RuntimeError(f"The number of given datasets and the number of dataset factors do not match: {len(datasets)}, {len(factors)}")
+
             print("Dataset weighting factors:",factors)
 
             for dataset, factor in zip(datasets,factors):
@@ -239,8 +249,12 @@ class DataCollatorSpeechSeq2SeqWithPadding:
 
         if "memory_words" in features[0]:
             memory_length_max = 100
+            avg_words_per_utterance = 3
 
-            memory_words = [word for feature in features for word in feature["memory_words"]]+[word for feature in features for word in feature["memory_word_dummys"]]
+            info = [(index2, feature, word) for index2, feature in enumerate(features) for word in feature["memory_words"]]
+            info = random.sample(info, avg_words_per_utterance*len(features))
+
+            memory_words = [word for index2, feature, word in info]+[word for feature in features for word in feature["memory_word_dummys"]]
             memory_words = memory_words[:memory_length_max]
 
             memory = self.tokenizer(memory_words, return_tensors="pt", padding=True)
@@ -250,31 +264,30 @@ class DataCollatorSpeechSeq2SeqWithPadding:
             memory_labels = torch.zeros_like(labels)
             memory_labels[labels.eq(-100)] = -100
             index = 0
-            for index2, feature in enumerate(features):
-                for word in feature["memory_words"]:
-                    ids = labels[index2][3:]
-                    mask = ids.ne(-100)
-                    ids = ids[mask][:-1]
+            for index2, feature, word in info:
+                ids = labels[index2][3:]
+                mask = ids.ne(-100)
+                ids = ids[mask][:-1]
 
-                    tokens = [self.tokenizer.decode(i) for i in ids]
-                    label = feature["labels"][len("<|en|>"):]
+                tokens = [self.tokenizer.decode(i) for i in ids]
+                label = feature["labels"][len("<|en|>"):]
 
-                    for start in range(len(tokens)):
-                        label = label[len(tokens[start]):]
-                        if not word in label:
-                            label = tokens[start]+label
-                            break
-                    for end in range(len(tokens)-1,-1,-1):
-                        label = label[:-len(tokens[end])]
-                        if not word in label:
-                            label = label+tokens[end]
-                            break
+                for start in range(len(tokens)):
+                    label = label[len(tokens[start]):]
+                    if not word in label:
+                        label = tokens[start]+label
+                        break
+                for end in range(len(tokens)-1,-1,-1):
+                    label = label[:-len(tokens[end])]
+                    if not word in label:
+                        label = label+tokens[end]
+                        break
 
-                    if word not in self.tokenizer.decode(labels[index2,start+3:end+4]):
-                        print("WARNING: Memory entry might be corrupted")
+                if word not in self.tokenizer.decode(labels[index2,start+3:end+4]):
+                    print("WARNING: Memory entry might be corrupted")
 
-                    index += 1
-                    memory_labels[index2,start+3:end+4] = index
+                index += 1
+                memory_labels[index2,start+3:end+4] = index
 
             #print(memory_labels.eq(0).sum(),memory_labels.ne(0).sum())
 

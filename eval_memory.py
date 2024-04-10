@@ -3,6 +3,7 @@ import requests
 import json
 
 split = "test"
+port = 4999
 
 segfile = "/project/OML/chuber/2023/data/earnings_nw_dataset/aligned_21/nw."+split+".test.seg.aligned"
 new_words = "/project/OML/chuber/2023/data/earnings_nw_dataset/aligned_21/nw."+split+".test.new_words"
@@ -27,10 +28,10 @@ for line,line2,line3 in zip(open(segfile),open(new_words),open(references)):
     memory = [w for w in new_word.split()]
     print("MEMORY:",memory)
 
-    res = requests.post("http://192.168.0.72:5000/asr/infer/en,en", files={"pcm_s16le":wav_, "prefix": "", "memory":json.dumps(memory)})
+    res = requests.post(f"http://192.168.0.72:{port}/asr/infer/en,en", files={"pcm_s16le":wav_, "prefix": "", "memory":json.dumps(memory)})
     hypo_mem = res.json()["hypo"]
     
-    res = requests.post("http://192.168.0.72:5000/asr/infer/en,en", files={"pcm_s16le":wav_, "prefix": "", "memory":json.dumps([])})
+    res = requests.post(f"http://192.168.0.72:{port}/asr/infer/en,en", files={"pcm_s16le":wav_, "prefix": "", "memory":json.dumps([])})
     hypo_nomem = res.json()["hypo"]
 
     print("REF:      ",reference)

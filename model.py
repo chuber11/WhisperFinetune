@@ -535,7 +535,8 @@ class Seq2SeqLMOutputMemory(Seq2SeqLMOutput):
 
 def get_loss(logits, labels, mask, mean=False): # shapes L x N, L, L
     #if labels.max() >= logits.shape[1] or labels.min() < 0:
-    #    breakpoint()
+        #print("WARNING: Label indices not in range! Ignoring.")
+        #return 0
     if not mean:
         return -F.log_softmax(logits, -1).gather(1, labels.unsqueeze(-1))[:,0][mask].sum()
     else:

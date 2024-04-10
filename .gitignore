@@ -21,3 +21,4 @@ data_impairedSpeech
 convert_hypos/outputs_convert.pt
 scores/*
 all_number_scores.txt
+data_numbers_human_train/*

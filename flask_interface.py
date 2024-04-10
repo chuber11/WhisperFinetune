@@ -16,7 +16,7 @@ from model import BaseModelOutputMemory
 from model import WhisperForConditionalGenerationMemory
 
 host = "0.0.0.0"
-port = 5000
+port = 4999
 
 app = Flask(__name__)
 
@@ -33,11 +33,12 @@ def initialize_model():
 
     processor.get_decoder_prompt_ids(language="en", task="transcribe") # WARNING: Changes state of processor
     
-    #model_path = "saves/model_newwords6/checkpoint-26000"
-    model_path = "saves/model_numbersFull/checkpoint-2800"
+    #model_path = "saves/model_newwords7/checkpoint-170000"
+    #model_path = "saves/model_numbersFull/checkpoint-2800"
+    model_path = "saves/model_newwords8/checkpoint-199000"
 
-    #model = WhisperForConditionalGenerationMemory.from_pretrained(model_path)
-    model = WhisperForConditionalGeneration.from_pretrained(model_path)
+    model = WhisperForConditionalGenerationMemory.from_pretrained(model_path)
+    #model = WhisperForConditionalGeneration.from_pretrained(model_path)
 
     model.generation_config.suppress_tokens = [t for t in model.generation_config.suppress_tokens if t!=25] # allow for : to be decoded
     
@@ -70,7 +71,7 @@ def infer_batch(audio_wavs, prefix="", input_language="en", task="transcribe", a
         #print(memory["attention_mask"])
     else:
         memory = None
-    
+
     if input_language != "None" and not "+" in input_language:
         forced_decoder_ids = processor.get_decoder_prompt_ids(language=input_language, task=task)
         add_prefix_tokens(processor, prefix, forced_decoder_ids)
@@ -112,9 +113,9 @@ def infer_batch(audio_wavs, prefix="", input_language="en", task="transcribe", a
                 num_beams=4,
                 forced_decoder_ids=forced_decoder_ids,
                 no_repeat_ngram_size=6,
-                #encoder_outputs_memory=encoder_outputs,
-                encoder_outputs=encoder_outputs,
-                #memory=memory,
+                encoder_outputs_memory=encoder_outputs, # comment for nonmemory model
+                #encoder_outputs=encoder_outputs, # uncomment for memory model
+                memory=memory, # comment for nonmemory model
             )
             for o,i in zip(processor.batch_decode(predicted_ids2, skip_special_tokens=True),indices):
                 outputs[i] = o

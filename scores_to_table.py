@@ -1,7 +1,7 @@
 
 import re
 
-data = {"WER EN":{},"WER DE":{},"Acc numbers human":{},"Acc numbers tts":{}}
+data = {"WER EN":{},"WER DE":{},"WER Numbers":{}}
 
 state = -1
 state2 = 0
@@ -25,38 +25,105 @@ for line in open("all_number_scores.txt"):
             id = line
         elif state2 in [1,2,3,4,5]:
             d = [x.split("=")[-1].strip() for x in line.split(",")]
-            data2[d[0]] = d[1:] 
+            data2[d[0]] = [float(d[1]),float(d[2]),float(d[3][:-1])]
             if state2 == 5:
                 set = "human" if state == 2 else "tts"
-                data[f"Acc numbers {set}"][id] = float(data2["All"][-1][:-1])
+                for k,v in data2.items():
+                    k2 = f"Acc numbers {set} {k}"
+                    if k2 not in data:
+                        data[k2] = {}
+                    data[k2][id] = v
+                data2 = {}
         state2 = (state2+1)%6
+    elif state == 4:
+        if state2 == 0:
+            id = line
+        elif state2 in [1,2,3]:
+            d = [x.split("=")[-1].strip() for x in line.split(",")]
+            data2[d[0]] = [float(d[1]),float(d[2]),float(d[3][:-1])]
+            if state2 == 3:
+                for k,v in data2.items():
+                    k2 = f"Acc numbers human train {k}"
+                    if k2 not in data:
+                        data[k2] = {}
+                    data[k2][id] = v
+                data2 = {}
+        state2 = (state2+1)%4
+    elif state == 5:
+        if state2 == 0:
+            id = line
+            if id == "openai_whisper-large-v2_converted":
+                id = "openai_whisper-large-v2 + gpt4-turbo"
+        elif state2 == 3:
+            wer = line.strip().split(": ")[1]
+            data["WER Numbers"][id] = 100*float(wer)
+        state2 = (state2+1)%5
     else:
         raise NotImplementedError
 
-print("\\begin{table}[h]")
-print("\\centering")
-print("\\begin{tabular}{|c|"+("".join(["c|" for i in range(len(data))]))+"}")
-print("\\hline")
-print("\\textbf{Model}"+("".join([" & \\textbf{"+k+"}" for k in data]))+" \\\\")
-print("\\hline")
+def map(k):
+    replaces = [("numbers human ",""),
+                ("year","years"),
+                ("timestamp","timestamps"),
+                ("currency","currency amounts"),
+                ("number","quantities"),
+                ("train ",""),
+                ("Acc","Acc. (\%)"),
+                ("WER","WER (\%)"),
+            ]
+    for r1,r2 in replaces:
+        k = k.replace(r1,r2)
+    return k
 
-pattern = r"model_numbers_batchweighting(\d+)_fact(\d+)_freeze(\d+)_real_dev_data(\d+)_lr(.+)_train_emb(\d+)_checkpoint-(\d+)"
+columns = [k for k in data.keys() if not "tts" in k and "All" not in k and not "Numbers" in k]
+columns.insert(2, columns.pop(3))
+columns.insert(6, columns.pop(-1))
+columns.insert(2,"WER Numbers")
 
-for model in data["WER EN"].keys():
-    if "hypo" in model:
-        model_name = model[len("hypos/hypo_"):].replace("_","/")
-    else:
-        match = re.match(pattern, model)
-        match = [match.group(i) for i in range(1,8)]
-        #model_name = f"bw {match[0]}, fact {match[1]}, freeze {match[2]}, real\_dev\_data {match[3]}, lr {match[4]}, train\_emb {match[5]}"
-        model_name = f"bw {match[0]}, fact {match[1]}, freeze {match[2]}, lr {match[4]}"
+allcolumns = [columns[:3],columns[3:]]
 
-    print(f"${model_name}$"+("".join(f" & {data[k][model]:.1f}\%" for k in data))+" \\\\")
-    
-    if "openai" in model_name:
-        print("$openai/whisper-large-v2 + LLM$ & - & - & 81.1\% & 81.2\% \\\\")
+for columns in allcolumns:
+    print("\\begin{table*}[h]")
+    print("\\centering")
+    print("\\begin{tabular}{|T{0.23\\textwidth}||"+("".join(["T{0.065\\textwidth}|" for i in range(len(columns))]))+"}")
+    print("\\hline")
+    print("Model"+("".join([" & "+map(k) for k in columns]))+" \\\\")
+    print("\\hline")
 
-print("\\hline")
-print("\\end{tabular}")
-print("\\end{table}")
+    pattern = r"model_numbers_batchweighting(\d+)_fact(\d+)_freeze(\d+)_real_dev_data(\d+)_lr(.+)_train_emb(\d+)_checkpoint-(\d+)"
+    pattern2 = r"model_numbers_baseline_fact(\d+)_freeze(\d+)_real_dev_data(\d+)_lr(.+)_train_emb(\d+)_checkpoint-(\d+)"
+
+    for model in data["WER EN"].keys():
+        if "openai" in model:
+            model_name = model.replace("_","/")
+            model_name = model_name.replace("openai/whisper-large-v2","baseline")
+        elif "baseline" in model:
+            continue
+            match = re.match(pattern2, model)
+            match = [match.group(i) for i in range(1,7)]
+            #model_name = f"baseline, fact {match[0]}, freeze {match[1]}, real\_dev\_data {match[2]}, lr {match[3]}, train\_emb {match[4]}"
+            model_name = f"baseline, fact {match[0]}, freeze {match[1]}, lr {match[3]}, train\_emb {match[4]}"
+        else:
+            match = re.match(pattern, model)
+            match = [match.group(i) for i in range(1,8)]
+            #model_name = f"bw {match[0]}, fact {match[1]}, freeze {match[2]}, real\_dev\_data {match[3]}, lr {match[4]}, train\_emb {match[5]}"
+            if match[0]!="0" or match[1]!="0" or match[2]!="0" or match[4]!="1e-6":
+                continue
+            #model_name = f"bw {match[0]}, fact {match[1]}, freeze {match[2]}, lr {match[4]}, train\_emb {match[5]}"
+            model_name = "fine-tuning"
+
+        s = f"{model_name}"
+        for k in columns:
+            if 'WER' in k:
+                s += f" & {data[k][model]:.1f}"
+            elif 'train' in k:
+                s += f" & {data[k][model][-1]:.1f}" if model in data[k] else " & "
+            else:
+                s += f" & {data[k][model][-1]:.1f}"
+        s += " \\\\"
+        print(s)
+        
+    print("\\hline")
+    print("\\end{tabular}")
+    #print("\\end{table}")
 

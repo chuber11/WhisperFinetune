@@ -60,7 +60,8 @@ class MySeq2SeqTrainer(Seq2SeqTrainer):
         self.label_names = ["labels"]
 
     def log(self, logs):
-        logs.update(self.compute_mymetrics())
+        dev = "eval_loss" in logs
+        logs.update(self.compute_mymetrics(dev))
         super().log(logs)
 
     def compute_loss(self, model, inputs, return_outputs=False):
@@ -74,11 +75,12 @@ class MySeq2SeqTrainer(Seq2SeqTrainer):
         else:
             return res[0]
 
-    def compute_mymetrics(self):
+    def compute_mymetrics(self, dev):
         logs = {}
         if self.statistics[1] > 0:
-            logs["loss_ntp"] = self.statistics[0]/self.statistics[1]
-            logs["ppl_ntp"] = math.exp(self.statistics[0]/self.statistics[1])
+            prefix = "" if not dev else "eval_"
+            logs[prefix+"loss_ntp"] = self.statistics[0]/self.statistics[1]
+            logs[prefix+"ppl_ntp"] = math.exp(self.statistics[0]/self.statistics[1])
             self.statistics = [0.0 for _ in range(len(self.statistics))]
         return logs
 
@@ -110,15 +112,16 @@ class MySeq2SeqTrainerMemory(MySeq2SeqTrainer):
         else:
             return res[0]
 
-    def compute_mymetrics(self):
+    def compute_mymetrics(self, dev):
         logs = {}
         index = 0
+        prefix = "" if not dev else "eval_"
         for l in ["_ntp","_mem"]:
             for m in ["_all","_nomem","_mem"]:
                 if self.statistics[index+2] > 0:
-                    logs["loss"+l+m] = self.statistics[index]/self.statistics[index+2]
-                    logs["ppl"+l+m] = math.exp(self.statistics[index]/self.statistics[index+2])
-                    logs["acc"+l+m] = self.statistics[index+1]/self.statistics[index+2]
+                    logs[prefix+"loss"+l+m] = self.statistics[index]/self.statistics[index+2]
+                    logs[prefix+"ppl"+l+m] = math.exp(self.statistics[index]/self.statistics[index+2])
+                    logs[prefix+"acc"+l+m] = self.statistics[index+1]/self.statistics[index+2]
                 index += 3
         logs = {k:v for k,v in sorted(list(logs.items()))}
         for i in range(len(self.statistics)):

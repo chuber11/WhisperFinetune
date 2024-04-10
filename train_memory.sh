@@ -20,7 +20,7 @@ if [ -e "$logfile" ] && [ "$1" != "-y" ]; then
 fi
 
 python -u train.py --model_path ./saves/model_$model_name \
-    --load saves/model_newwords6_ \
+    `#--load saves/model_newwords6_` \
     --use_memory \
     --warmup_steps 500 --learning_rate 1e-4 \
     --log_steps 10 \
