@@ -78,6 +78,7 @@ def infer_batch(audio_wavs, prefix="", input_language="en", task="transcribe", a
     else:
         output = model.generate(
             input_values, 
+            forced_decoder_ids=[(1,None)],
             max_new_tokens=1,
             return_dict_in_generate=True,
             output_scores=True,
@@ -307,6 +308,15 @@ def inference(input_language, output_language):
 def version():
     # return dict or string (as first argument)
     return "Whisper", 200
+
+@app.route("/asr/extract_words", methods=["POST"])
+def extract_words_route():
+    from extract_words import extract_words
+    import base64
+    pdf_bytes = request.files["pdf_bytes"].read()
+    pdf_bytes = base64.b64decode(pdf_bytes)
+    res = {"memory_words": extract_words(pdf_bytes)}
+    return res, 200
 
 (model, processor), max_batch_size = initialize_model()
 

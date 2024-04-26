@@ -20,8 +20,8 @@ if [ -e "$logfile" ] && [ "$1" != "-y" ]; then
 fi
 
 python -u train.py --model_path ./saves/model_$model_name \
-    --segfiles "data_impairedSpeech/impairedSpeech.DE.train.seg.aligned" \
-    --segfiles_dev "data_impairedSpeech/impairedSpeech.DE.dev.seg.aligned" \
+    --segfiles "data_impairedSpeech_new/impairedSpeech.DE.train.seg.aligned" \
+    --segfiles_dev "data_impairedSpeech_new/impairedSpeech.DE.dev.seg.aligned" \
     --warmup_steps 100 --learning_rate 1e-5 \
     --log_steps 10 \
     --eval_steps 10 \
