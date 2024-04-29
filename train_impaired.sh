@@ -23,7 +23,7 @@ python -u train.py --model_path ./saves/model_$model_name \
     --segfiles "data_impairedSpeech_new/impairedSpeech.DE.train.seg.aligned" \
     --segfiles_dev "data_impairedSpeech_new/impairedSpeech.DE.dev.seg.aligned" \
     --warmup_steps 100 --learning_rate 1e-5 \
-    --log_steps 10 \
+    --log_steps 10 --model_name openai/whisper-large-v3 \
     --eval_steps 10 \
     `#--gradient_checkpointing` \
     `#--factorization_rank 16` `#--factorization_only_decoder` \

@@ -318,3 +318,54 @@ def compute_metrics(pred):
     wer = 100 * metric.compute(predictions=pred_str, references=label_str)
 
     return {"ppl":ppl, "wer": wer}
+
+class MyMTDataset(Dataset):
+    def __init__(self, segfiles, dev=False):
+
+        self.sources = []
+        self.targets = []
+
+        for segfile in glob(segfiles):
+            print(segfile)
+
+            target = ".".join(segfile.split(".")[:-2])+".cased"
+            source = ".".join(segfile.split(".")[:-2])+".tts"
+
+            lang = "en_XX"
+            if "DE" in segfile:
+                lang = "de_DE"
+
+            for line, line2 in zip(open(source),open(target)):
+                line = line.strip()
+                line2 = line2.strip()
+
+                self.sources.append(line)
+                self.targets.append(line2)
+
+        self.len = len(self.sources)
+
+    def __len__(self):
+        return self.len
+
+    def __getitem__(self, idx):
+        return {"src":self.sources[idx], "tgt":self.targets[idx]}
+
+@dataclass
+class DataCollatorMTSeq2SeqWithPadding:
+    tokenizer: Any
+
+    def __call__(self, features: List[Dict[str, Union[List[int], torch.Tensor]]],                 inference=False) -> Dict[str, torch.Tensor]:
+        source = self.tokenizer([f["src"] for f in features],return_tensors="pt",padding=True)
+        target = self.tokenizer([f["tgt"] for f in features],return_tensors="pt",padding=True)
+
+        input_ids = target["input_ids"][:,:-1]
+
+        mask = target["attention_mask"][:,1:]
+        labels = target["input_ids"][:,1:].clone()
+        labels[mask.eq(0)] = -100
+
+        batch = source
+        batch.update({"decoder_input_ids":input_ids, "decoder_attention_mask":mask, "labels":labels})
+
+        return batch
+
