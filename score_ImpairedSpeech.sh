@@ -36,6 +36,6 @@ do
 	python $e_scripts/wer.py --hypo hypos/$path/hypo_postpr_lc.txt --ref data_impairedSpeech/impairedSpeech.DE.test.id+lower --ref-field 1 --word-stats-file hypos/$path/stats_txt_AE_$lang.txt > hypos/$path/eval_$lang
 	tail -n4 hypos/$path/eval_$lang
 
-	python $e_scripts/wer.py --hypo hypos/$path/hypo_ipa.txt --ref data_impairedSpeech/impairedSpeech.DE.test.id+lower_ipa --ref-field 1 --word-stats-file hypos/$path/stats_txt_AE_${lang}_ipa.txt > hypos/$path/eval_$lang
+	#python $e_scripts/wer.py --hypo hypos/$path/hypo_ipa.txt --ref data_impairedSpeech/impairedSpeech.DE.test.id+lower_ipa --ref-field 1 --word-stats-file hypos/$path/stats_txt_AE_${lang}_ipa.txt > hypos/$path/eval_$lang
 done
 

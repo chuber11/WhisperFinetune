@@ -22,5 +22,5 @@ convert_hypos/outputs_convert.pt
 scores/*
 all_number_scores.txt
 data_numbers_human_train/*
-hypos_whisper_cv/*
-data_impairedSpeech_new/*
+hypos*/*
+data*/*

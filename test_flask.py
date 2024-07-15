@@ -24,8 +24,8 @@ for line in open(segfile):
 
     wav_ = wav[int(32000*start):int(32000*end)]
 
-    #res = requests.post("http://192.168.0.72:5000/asr/infer/en,en", files={"pcm_s16le":wav_, "prefix": "My professor is called Alexander Waibel, and I hope the name is recognised correctly. For sure let’t do another test. Alexander Waibel is his", "memory":json.dumps(["Waibel"])})
-    res = requests.post("http://192.168.0.72:5000/asr/infer/en,en", files={"pcm_s16le":wav_, "prefix": "", "memory":json.dumps(["Waibel"])})
+    res = requests.post("http://192.168.0.72:4999/asr/infer/en,en", files={"pcm_s16le":wav_, "prefix": "My professor is called Alexander Waibel, and I hope the name is recognised correctly. For sure let’t do another test. Alexander Waibel is his name.", "memory":json.dumps(["Waibel"])})
+    #res = requests.post("http://192.168.0.72:4999/asr/infer/en,en", files={"pcm_s16le":wav_, "prefix": "", "memory":json.dumps(["Waibel"])})
     hypo = res.json()["hypo"]
 
     print(hypo)

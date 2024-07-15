@@ -4,6 +4,8 @@ if [ -z "$1" ]; then
     exit 1  # Exit with a non-zero status to indicate an error
 fi
 
+langs=${2:-EN DE}
+
 path=`echo $1 | sed "s/\//_/g"`
 e_scripts=scripts
 
@@ -16,7 +18,7 @@ mkdir -p hypos/$path
 
 python $e_scripts/clean_lc.py -inf hypos/hypo_$path.txt -i 1 -lc -splitter space -o hypos/$path/hypo_postpr.txt
 
-for lang in EN DE
+for lang in $langs
 do
     #if [ ! "hypos/hypo_$path.txt" == *"$lang"* ]; then
         #echo hypos/hypo_$path.txt $lang

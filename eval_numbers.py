@@ -28,6 +28,8 @@ for hypofile in glob(hypofiles):
         numbers = extract_numbers(label)
 
         for n in numbers:
+            if type == "number" and not "." in n and not "," in n and int(n) <= 12:
+                continue
             if not type in correct:
                 if n in hypo:
                     correct[type] = 1
@@ -37,8 +39,8 @@ for hypofile in glob(hypofiles):
             else:
                 if n in hypo:
                     correct[type] += 1
-                else: #if type == "currency":
-                    pass #print(hypo,n)
+                #elif type=="number":
+                #    print(type,hypo,n)
                 total[type] += 1
 
 for (type,c),(_,t) in zip(correct.items(),total.items()):

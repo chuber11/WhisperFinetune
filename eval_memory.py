@@ -34,10 +34,19 @@ for line,line2,line3 in zip(open(segfile),open(new_words),open(references)):
     res = requests.post(f"http://192.168.0.72:{port}/asr/infer/en,en", files={"pcm_s16le":wav_, "prefix": "", "memory":json.dumps([])})
     hypo_nomem = res.json()["hypo"]
 
+    better = new_word in hypo_mem and not new_word in hypo_nomem
+    worse = not new_word in hypo_mem and new_word in hypo_nomem
+
     print("REF:      ",reference)
     print("HYPOMEM:  ",hypo_mem)
     print("HYPONOMEM:",hypo_nomem)
-    print("NEW WORD:",new_word,new_word in hypo_mem)
+    print("NEW WORD:",new_word, end=" ")
+    if better:
+        print("BETTER")
+    elif worse:
+        print("WORSE")
+    else:
+        print()
 
     if new_word in hypo_nomem:
         correct_nomem += 1

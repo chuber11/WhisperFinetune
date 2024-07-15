@@ -1,7 +1,7 @@
 
 import re
 
-data = {"WER EN":{},"WER DE":{},"WER Numbers":{}}
+data = {"WER EN":{},"WER DE":{},"WER Numbers EN":{},"WER Numbers DE":{}}
 
 state = -1
 state2 = 0
@@ -49,14 +49,21 @@ for line in open("all_number_scores.txt"):
                     data[k2][id] = v
                 data2 = {}
         state2 = (state2+1)%4
-    elif state == 5:
+    elif state in [5,6]:
         if state2 == 0:
             id = line
             if id == "openai_whisper-large-v2_converted":
                 id = "openai_whisper-large-v2 + gpt4-turbo"
+            """elif id == "openai_whisper-large-v2+textseg1_beam4.wer":
+                id = "openai_whisper-large-v2 + textseg1_beam4.wer"
+            elif id == "openai_whisper-large-v2+textseg2_beam4.wer":
+                id = "openai_whisper-large-v2 + textseg2_beam4.wer"""
+            if id.startswith("saves"):
+                id = id[len("saves_"):]
         elif state2 == 3:
             wer = line.strip().split(": ")[1]
-            data["WER Numbers"][id] = 100*float(wer)
+            lang = "EN" if state==5 else "DE"
+            data[f"WER Numbers {lang}"][id] = 100*float(wer)
         state2 = (state2+1)%5
     else:
         raise NotImplementedError
@@ -78,9 +85,10 @@ def map(k):
 columns = [k for k in data.keys() if not "tts" in k and "All" not in k and not "Numbers" in k]
 columns.insert(2, columns.pop(3))
 columns.insert(6, columns.pop(-1))
-columns.insert(2,"WER Numbers")
+columns.insert(2,"WER Numbers EN")
+columns.insert(3,"WER Numbers DE")
 
-allcolumns = [columns[:3],columns[3:]]
+allcolumns = [columns[:4],columns[4:8]]
 
 for columns in allcolumns:
     print("\\begin{table*}[h]")
@@ -98,23 +106,28 @@ for columns in allcolumns:
             model_name = model.replace("_","/")
             model_name = model_name.replace("openai/whisper-large-v2","baseline")
         elif "baseline" in model:
-            continue
+            #continue
             match = re.match(pattern2, model)
             match = [match.group(i) for i in range(1,7)]
             #model_name = f"baseline, fact {match[0]}, freeze {match[1]}, real\_dev\_data {match[2]}, lr {match[3]}, train\_emb {match[4]}"
-            model_name = f"baseline, fact {match[0]}, freeze {match[1]}, lr {match[3]}, train\_emb {match[4]}"
+            model_name = f"fine-tuning old data, fact {match[0]}, freeze {match[1]}, lr {match[3]}, train\_emb {match[4]}"
         else:
             match = re.match(pattern, model)
             match = [match.group(i) for i in range(1,8)]
             #model_name = f"bw {match[0]}, fact {match[1]}, freeze {match[2]}, real\_dev\_data {match[3]}, lr {match[4]}, train\_emb {match[5]}"
-            if match[0]!="0" or match[1]!="0" or match[2]!="0" or match[4]!="1e-6":
-                continue
-            #model_name = f"bw {match[0]}, fact {match[1]}, freeze {match[2]}, lr {match[4]}, train\_emb {match[5]}"
-            model_name = "fine-tuning"
+            #if match[0]!="0" or match[1]!="0" or match[2]!="0" or match[4]!="1e-6":
+            #    continue
+            model_name = f"bw {match[0]}, fact {match[1]}, freeze {match[2]}, lr {match[4]}, train\_emb {match[5]}"
+            #model_name = "fine-tuning"
 
         s = f"{model_name}"
         for k in columns:
             if 'WER' in k:
+                if model not in data[k]:
+                    print([k for k in data[k].keys() if "350" in k])
+                    print("WARNING",model)
+                    sys.exit()
+                    continue
                 s += f" & {data[k][model]:.1f}"
             elif 'train' in k:
                 s += f" & {data[k][model][-1]:.1f}" if model in data[k] else " & "

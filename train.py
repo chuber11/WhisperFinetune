@@ -245,6 +245,9 @@ else:
         print("Loading checkpoint from",checkpoint)
         model = model_class.from_pretrained(checkpoint, torch_dtype="auto", device_map="cuda")
 
+        #for p in model.proj_out.parameters():
+        #    p.requires_grad = True
+
         possible_factorization = True
 
 if load_adapter is not None:
@@ -282,7 +285,7 @@ training_args = Seq2SeqTrainingArguments(
     per_device_train_batch_size=args.batch_size,
     gradient_accumulation_steps=args.gradient_accumulation_steps, # increase by 2x for every 2x decrease in batch size
     learning_rate=args.learning_rate,
-    lr_scheduler_type="constant_with_warmup",
+    lr_scheduler_type="linear", #"constant_with_warmup",
     warmup_steps=args.warmup_steps,
     max_steps=200000,
     gradient_checkpointing=args.gradient_checkpointing,

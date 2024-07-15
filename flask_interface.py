@@ -16,7 +16,7 @@ from model import BaseModelOutputMemory
 from model import WhisperForConditionalGenerationMemory
 
 host = "0.0.0.0"
-port = 4999
+port = 4998
 
 app = Flask(__name__)
 
@@ -33,14 +33,13 @@ def initialize_model():
 
     processor.get_decoder_prompt_ids(language="en", task="transcribe") # WARNING: Changes state of processor
     
-    #model_path = "saves/model_newwords7/checkpoint-170000"
-    #model_path = "saves/model_numbersFull/checkpoint-2800"
-    model_path = "saves/model_newwords8/checkpoint-199000"
+    model_path = "saves/model_numbers_batchweighting0_fact0_freeze0_real_dev_data0_lr1e-6_train_emb0/checkpoint-300"
 
-    model = WhisperForConditionalGenerationMemory.from_pretrained(model_path)
-    #model = WhisperForConditionalGeneration.from_pretrained(model_path)
+    #model = WhisperForConditionalGenerationMemory.from_pretrained(model_path)
+    model = WhisperForConditionalGeneration.from_pretrained(model_path)
 
     model.generation_config.suppress_tokens = [t for t in model.generation_config.suppress_tokens if t!=25] # allow for : to be decoded
+    model.generation_config.begin_suppress_tokens.remove(50257)
     
     print("ASR initialized")
 
@@ -57,7 +56,7 @@ def add_prefix_tokens(processor, prefix, forced_decoder_ids):
         for wid in prompt_ids:
             forced_decoder_ids.append((len(forced_decoder_ids) + 1, wid))
 
-def infer_batch(audio_wavs, prefix="", input_language="en", task="transcribe", audio_sample_rate=16000, memory_words=None):
+def infer_batch(audio_wavs, prefix="", input_language="en", task="transcribe", audio_sample_rate=16000, memory_words=None, num_beams=4):
     # get device based on the model parameters
     device = next(model.parameters()).device
         
@@ -111,12 +110,12 @@ def infer_batch(audio_wavs, prefix="", input_language="en", task="transcribe", a
 
             predicted_ids2 = model.generate(
                 input_values[indices], 
-                num_beams=4,
+                num_beams=num_beams,
                 forced_decoder_ids=forced_decoder_ids,
                 no_repeat_ngram_size=6,
-                encoder_outputs_memory=encoder_outputs, # comment for nonmemory model
-                #encoder_outputs=encoder_outputs, # uncomment for memory model
-                memory=memory, # comment for nonmemory model
+                #encoder_outputs_memory=encoder_outputs, # comment for nonmemory model
+                encoder_outputs=encoder_outputs, # uncomment for memory model
+                #memory=memory, # comment for nonmemory model
             )
             for o,i in zip(processor.batch_decode(predicted_ids2, skip_special_tokens=True),indices):
                 outputs[i] = o
@@ -125,10 +124,10 @@ def infer_batch(audio_wavs, prefix="", input_language="en", task="transcribe", a
 
     predicted_ids = model.generate(
         input_values, 
-        num_beams=4,
+        num_beams=num_beams,
         forced_decoder_ids=forced_decoder_ids,
         no_repeat_ngram_size=6,
-        memory=memory,
+        #memory=memory,
     )
 
     print([(processor.tokenizer.decode(i),i.item()) for i in predicted_ids[0]])

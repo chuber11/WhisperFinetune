@@ -58,6 +58,12 @@ class WhisperDecoderLayerMemory(WhisperDecoderLayer):
         self.memory_attn = AttentionMemory(self.embed_dim)
         self.memory_layer_norm = nn.LayerNorm(self.embed_dim)
 
+        self.entry_norm = False
+        if self.entry_norm:
+            self.memory_entry_attn_layer_norm = nn.LayerNorm(self.embed_dim)
+
+        self.use_memory_entry_attn = True
+
         self.memory_entry_attn = WHISPER_ATTENTION_CLASSES[config._attn_implementation](
             self.embed_dim,
             config.decoder_attention_heads,
@@ -87,6 +93,8 @@ class WhisperDecoderLayerMemory(WhisperDecoderLayer):
             attention_mask = memory_text_mask[mem_attn_out].unsqueeze(1).unsqueeze(1) # mask.sum() x 1 x 1 x l_mem
 
             memory_entry_attn = self.memory_entry_attn(hidden_states=hidden_states, key_value_states=key_value_states, attention_mask=attention_mask)[0] # mask.sum() x 1 x d_model
+            if self.entry_norm:
+                memory_entry_attn = self.memory_entry_attn_layer_norm(memory_entry_attn)
 
             output = torch.zeros_like(dec_output, dtype=memory_entry_attn.dtype) # b*l_tar x d_model
             output[indices] = memory_entry_attn[:,0]
@@ -119,12 +127,17 @@ class WhisperDecoderLayerMemory(WhisperDecoderLayer):
 
         cross_attn_weights = self.memory_attn(hidden_states, encoder_output_memory) # b x l_tgt x (n_mem+1)
         #if cross_attn_weights.argmax(-1).gt(0).any():
-        #    print(cross_attn_weights.argmax(-1),encoder_output_memory.shape)
+        #    print(cross_attn_weights.argmax(-1))
+        #    print(F.softmax(cross_attn_weights,-1)[:,:,-1])
 
-        hidden_states = self.calc_memory_entry_attn(dec_output=hidden_states,
-                                                    mem_attn_out=cross_attn_weights,
-                                                    memory_text_enc=memory_text_embeds,
-                                                    memory_text_mask=memory_text_mask)
+        if self.use_memory_entry_attn:
+            hidden_states = self.calc_memory_entry_attn(dec_output=hidden_states,
+                                                        mem_attn_out=cross_attn_weights,
+                                                        memory_text_enc=memory_text_embeds,
+                                                        memory_text_mask=memory_text_mask)
+        else:
+            key_value_states = encoder_output_memory.unsqueeze(0).expand(hidden_states.shape[0],-1,-1)
+            hidden_states = self.memory_entry_attn(hidden_states=hidden_states, key_value_states=key_value_states)[0]
 
         if hidden_states is not None:
             hidden_states = nn.functional.dropout(hidden_states, p=self.dropout, training=self.training)
@@ -509,7 +522,8 @@ class WhisperModelMemory(WhisperModel):
         if not self.two_decoders:
             decoder_outputs = decoder_outputs_memory
         else:
-            mask = torch.stack([c.argmax(-1).gt(0) for c in decoder_outputs_memory['all_memory_cross_attentions']]).any(0) # b x l_tgt
+            #mask = torch.stack([c.argmax(-1).gt(0) for c in decoder_outputs_memory['all_memory_cross_attentions']]).any(0) # b x l_tgt
+            mask = decoder_outputs_memory['all_memory_cross_attentions'][-1].argmax(-1).gt(0) # b x l_tgt
             decoder_outputs["last_hidden_state"][mask] = decoder_outputs_memory["last_hidden_state"][mask]
 
             decoder_outputs['past_key_values'] = decoder_outputs['past_key_values'] + decoder_outputs_memory['past_key_values']
@@ -627,11 +641,11 @@ class WhisperForConditionalGenerationMemoryWrapper(WhisperForConditionalGenerati
 
         statistics = None
         if memory_labels is not None:
-            factor_mem = 1e-1
+            factor_mem = 1e-2 #1e-1
 
             memory_labels = memory_labels.to(lm_logits.device).reshape(-1)
-            mask = labels.ge(0)
-            mask_ = labels.lt(0)
+            mask = memory_labels.ge(0)
+            mask_ = memory_labels.lt(0)
 
             for cross_attn_weights in outputs.all_memory_cross_attentions:
                 cross_attn_weights = cross_attn_weights.view(-1, cross_attn_weights.shape[-1])

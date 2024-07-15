@@ -11,7 +11,8 @@ model_name="numbers_batchweighting${batch_weighting}_fact${factorization}_freeze
 args=""
 
 if [ $batch_weighting -eq 0 ]; then
-    args+=" --segfiles data_numbers/llm_augment.*.train.seg.aligned"
+    #args+=" --segfiles data_numbers/llm_augment.*.train.seg.aligned"
+    args+=" --segfiles data_numbers/llm_augment.*.train.seg.aligned data_timestamps/llm_augment.*.seg.aligned"
 else
     args+=" --segfiles data_filtered/cv_filtered.*.train.seg.aligned data_numbers/llm_augment.*.train.seg.aligned --dataset_factors 1 1 $batch_weighting $batch_weighting"
 fi

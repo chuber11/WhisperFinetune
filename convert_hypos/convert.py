@@ -8,11 +8,12 @@ from tqdm import tqdm
 from glob import glob
 import re
 import getpass
+import jiwer
 
 def response2output(response):
     output = json.loads(response)["choices"][0]["message"]["content"]
     usage = json.loads(response)["usage"]
-    price_ = (usage['prompt_tokens']*0.5+usage['completion_tokens']*1.5)/1000000*100
+    price_ = (usage['prompt_tokens']*5+usage['completion_tokens']*15)/1000000*100
     global price
     price += price_
     return output
@@ -125,12 +126,19 @@ def run_llm(utterance, model="gpt-4-turbo-preview", max_tokens=512, number=0):
     else:
         response = outputs[key]
 
-        print(json.loads(response)["model"])
-
     response = response2output(response).strip().split("\n")
     if len(response) > 1:
-        print(response)
-    return response[0]
+        print("WARNING: Result contains multiple lines! Using input as output")
+        output = utterance
+        return output
+    output = response[0]
+
+    wer = jiwer.wer(output, utterance)
+    if wer > 0.5:
+        output = utterance
+        print("WARNING: WER > 0.5! Using input as output")
+
+    return output
 
 price = 0
 client = None
@@ -146,8 +154,9 @@ if __name__ == "__main__":
         outputs = {}
 
     number = 3
+    #model = "gpt-3.5-turbo"
     #model = "gpt-4-turbo-preview"
-    model = "gpt-3.5-turbo"
+    model = "gpt-4o"
 
     allfiles = [#"../hypos/hypo_openai_whisper-large-v2_beam4.*.txt",
         "../hypos/hypo_openai_whisper-large-v2_beam4.*.human.txt",
@@ -163,7 +172,7 @@ if __name__ == "__main__":
             #random.shuffle(lines)
 
             for i,line in enumerate(lines):
-                print(i)
+                #print(i)
 
                 line = line.strip().split()
                 id, hypo = line[0], " ".join(line[1:])

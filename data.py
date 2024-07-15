@@ -28,12 +28,15 @@ def replace_except_specified_chars(text):
 class MyDataset(Dataset):
     def __init__(self, segfiles, dev=False, replace=None, max_len=2000, memory=False, test=False):
         if replace is None:
-            replace = [("/project/asr_systems/LT2021/EN/data","/export/data2/chuber/ASR/data/EN")]
+            replace = [("/project/asr_systems/LT2022/data/DE/cv14.0/download","/export/data2/chuber/2024/CV/DE"),
+                       ("/project/asr_systems/LT2022/data/EN/cv14.0/download","/export/data2/chuber/2024/CV/EN")]
 
         self.ids = []
         self.audio_paths = []
         self.timestamps = []
         self.labels = []
+
+        self.memory = memory and not test
 
         all_segfiles = glob(segfiles)
         if len(all_segfiles) == 0 and os.path.isfile(segfiles):
@@ -66,7 +69,8 @@ class MyDataset(Dataset):
                     lang = "<|en|>"
                     if "DE" in segfile:
                         lang = "<|de|>"
-                    self.labels.append(lang+line2.strip())
+                    prefix = "" if not self.memory else " "
+                    self.labels.append(lang+prefix+line2.strip())
             else:
                 for line in open(segfile):
                     line = line.strip().split()
@@ -97,8 +101,6 @@ class MyDataset(Dataset):
         self.len = len(self.audio_paths)
         if dev:
             self.len = min(max_len,self.len)
-
-        self.memory = memory and not test
 
         if self.memory:
             new_words_list = f"new_words_list_{segfiles.replace('/','_').replace('train','').replace('dev','')}.pt"
@@ -226,6 +228,8 @@ class DataCollatorSpeechSeq2SeqWithPadding:
 
         batch = {"input_features": audio}
 
+        has_memory = "memory_words" in features[0]
+
         if features[0]["labels"] is not None:
             text_labels = self.tokenizer([feature["labels"] for feature in features], return_tensors="pt", padding=True)
 
@@ -247,14 +251,14 @@ class DataCollatorSpeechSeq2SeqWithPadding:
         if self.return_ids:
             batch["ids"] = [item["id"] for item in features]
 
-        if "memory_words" in features[0]:
+        if has_memory:
             memory_length_max = 100
             avg_words_per_utterance = 3
 
             info = [(index2, feature, word) for index2, feature in enumerate(features) for word in feature["memory_words"]]
             info = random.sample(info, avg_words_per_utterance*len(features))
 
-            memory_words = [word for index2, feature, word in info]+[word for feature in features for word in feature["memory_word_dummys"]]
+            memory_words = [" "+word for index2, feature, word in info]+[" "+word for feature in features for word in feature["memory_word_dummys"]]
             memory_words = memory_words[:memory_length_max]
 
             memory = self.tokenizer(memory_words, return_tensors="pt", padding=True)
@@ -291,6 +295,36 @@ class DataCollatorSpeechSeq2SeqWithPadding:
 
             #print(memory_labels.eq(0).sum(),memory_labels.ne(0).sum())
 
+            good = 0
+            anz = 0
+            for i in range(len(labels)):
+                for j in range(1,len(labels[i])):
+                    if memory_labels[i][j] != 0 and memory_labels[i][j-1]!=memory_labels[i][j]:
+                        anz += 1
+                        use = True
+                        for k in range(j,len(labels[i])):
+                            if memory_labels[i][k] != memory_labels[i][j]:
+                                break
+                            if memory_labels[i][j] == -100:
+                                break
+                            mem = memory["input_ids"][memory_labels[i][j]-1]
+                            if labels[i][k] != mem[k-j]:
+                                use = False
+                                break
+                                #print(labels[i],k)
+                                #print(memory_labels[i])
+                                #print(mem,k-j) 
+                                #breakpoint()
+                        if use:
+                            good += 1
+                        else:
+                            for k in range(j,len(labels[i])):
+                                if memory_labels[i][k] != memory_labels[i][j]:
+                                    break
+                                if memory_labels[i][j] == -100:
+                                    break
+                                memory_labels[i][k] = -100
+
             batch["memory"] = memory
             batch["memory_labels"] = memory_labels
 
@@ -320,52 +354,85 @@ def compute_metrics(pred):
     return {"ppl":ppl, "wer": wer}
 
 class MyMTDataset(Dataset):
-    def __init__(self, segfiles, dev=False):
+    def __init__(self, segfiles, dev=False, test=False, max_len=2000):
+        self.test = test
 
         self.sources = []
-        self.targets = []
+        if not test:
+            self.targets = []
 
-        for segfile in glob(segfiles):
-            print(segfile)
+            for segfile in glob(segfiles):
+                print(segfile)
 
-            target = ".".join(segfile.split(".")[:-2])+".cased"
-            source = ".".join(segfile.split(".")[:-2])+".tts"
+                target = ".".join(segfile.split(".")[:-2])+".cased"
+                source = ".".join(segfile.split(".")[:-2])+".tts"
 
-            lang = "en_XX"
-            if "DE" in segfile:
-                lang = "de_DE"
+                lang = "en_XX"
+                if "DE" in segfile:
+                    lang = "de_DE"
 
-            for line, line2 in zip(open(source),open(target)):
-                line = line.strip()
-                line2 = line2.strip()
+                for line, line2 in zip(open(source),open(target)):
+                    line = line.strip()
+                    line2 = line2.strip()
 
-                self.sources.append(line)
-                self.targets.append(line2)
+                    if len(line) > 5*len(line2):
+                        continue
+
+                    self.sources.append(line)
+                    self.targets.append(line2)
+        else:
+            self.ids = []
+
+            for segfile in glob(segfiles):
+                print(segfile)
+
+                for line in open(segfile):
+                    line = line.strip().split()
+                    id, src = line[0], " ".join(line[1:])
+
+                    self.ids.append(id)
+                    self.sources.append(src)
+
+        #print(sum(len(s) for s in self.sources)/len(self.sources),max(len(s) for s in self.sources))
+        #print(sum(len(s) for s in self.targets)/len(self.targets),max(len(s) for s in self.targets))
 
         self.len = len(self.sources)
+        #if dev:
+        #    self.len = min(max_len,self.len)
+        print(self.len)
 
     def __len__(self):
         return self.len
 
     def __getitem__(self, idx):
-        return {"src":self.sources[idx], "tgt":self.targets[idx]}
+        if not self.test:
+            return {"src":self.sources[idx], "tgt":self.targets[idx]}
+        else:
+            return {"src":self.sources[idx], "id":self.ids[idx]}
 
 @dataclass
 class DataCollatorMTSeq2SeqWithPadding:
     tokenizer: Any
+    return_ids: bool = False
 
     def __call__(self, features: List[Dict[str, Union[List[int], torch.Tensor]]],                 inference=False) -> Dict[str, torch.Tensor]:
         source = self.tokenizer([f["src"] for f in features],return_tensors="pt",padding=True)
-        target = self.tokenizer([f["tgt"] for f in features],return_tensors="pt",padding=True)
-
-        input_ids = target["input_ids"][:,:-1]
-
-        mask = target["attention_mask"][:,1:]
-        labels = target["input_ids"][:,1:].clone()
-        labels[mask.eq(0)] = -100
 
         batch = source
-        batch.update({"decoder_input_ids":input_ids, "decoder_attention_mask":mask, "labels":labels})
+
+        if "tgt" in features[0]:
+            target = self.tokenizer([f["tgt"] for f in features],return_tensors="pt",padding=True)
+
+            input_ids = target["input_ids"][:,:-1]
+
+            mask = target["attention_mask"][:,1:]
+            labels = target["input_ids"][:,1:].clone()
+            labels[mask.eq(0)] = -100
+
+            batch.update({"decoder_input_ids":input_ids, "decoder_attention_mask":mask, "labels":labels})
+        else:
+            ids = [f["id"] for f in features]
+            batch["ids"] = ids
 
         return batch
 

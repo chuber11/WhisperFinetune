@@ -1,5 +1,5 @@
 
-model_name="${2:-segmenter1}"
+model_name="${2:-segmenter3}"
 
 clear
 
@@ -20,8 +20,8 @@ if [ -e "$logfile" ] && [ "$1" != "-y" ]; then
 fi
 
 python -u train_mt.py --model_path ./saves/model_$model_name \
-    --segfiles hypos_whisper_cv/step1/cv_filtered.*.train.seg.aligned \
-    --segfiles_dev hypos_whisper_cv/step1/cv_filtered.*.dev.seg.aligned \
+    --segfiles data_textseg/textseg_filtered.train..tts \
+    --segfiles_dev data_textseg/textseg_filtered.dev..tts \
     --eval_steps 500 \
     | tee $logfile
 

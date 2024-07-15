@@ -1,5 +1,5 @@
 
-model_name="${2:-segmenter1}"
+model_name="${2:-segmenter2_moredata}"
 
 clear
 
@@ -20,8 +20,11 @@ if [ -e "$logfile" ] && [ "$1" != "-y" ]; then
 fi
 
 python -u train_mt.py --model_path ./saves/model_$model_name \
-    --segfiles hypos_whisper_cv/step1/cv_filtered.*.train.seg.aligned \
-    --segfiles_dev hypos_whisper_cv/step1/cv_filtered.*.dev.seg.aligned \
-    --eval_steps 500 \
+    `#--segfiles "hypos_whisper_cv/step2/llm_augment.*.train.seg.aligned"` \
+    --segfiles_dev "hypos_whisper_cv/step2/llm_augment.*.dev.seg.aligned" \
+    --segfiles "hypos_whisper_cv/step2/llm_augment.*.train.seg.aligned" "hypos_whisper_cv/step2_more/llm_augment.*.seg.aligned" \
+    --load saves/model_segmenter1 \
+    --learning_rate 1e-5 `#--train_embedding` \
+    --eval_steps 10 \
     | tee $logfile
 

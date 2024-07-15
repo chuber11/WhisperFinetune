@@ -86,7 +86,7 @@ class MySeq2SeqTrainer(Seq2SeqTrainer):
         super()._save(output_dir, **kwargs)
 
         if hasattr(self.model, "save_embedding_separate") and self.model.save_embedding_separate:
-            embedding = {k:v for k,v in self.model.base_model.state_dict().items() if "embed_tokens" in k or "proj_out" in k}
+            embedding = {k:v for k,v in self.model.base_model.state_dict().items() if "embed_tokens" in k or "lm_head" in k}
             torch.save(embedding, os.path.join(output_dir, "embedding.pt"))
 
 class MyCallback(TrainerCallback):
@@ -195,10 +195,10 @@ else:
         print("Loading checkpoint from",checkpoint)
         model = model_class.from_pretrained(checkpoint, torch_dtype="auto", device_map="cuda")
 
-        #for p in model.proj_out.parameters():
-        #    p.requires_grad = True
-
         possible_factorization = True
+
+for p in model.lm_head.parameters():
+    p.requires_grad = False
 
 if load_adapter is not None:
     files = glob(load_adapter+"/*")
@@ -218,7 +218,7 @@ if args.only_train_embedding:
     for p in model.parameters():
         p.requires_grad = False
 if args.only_train_embedding or args.train_embedding:
-    for p in model.proj_out.parameters():
+    for p in model.lm_head.parameters():
         p.requires_grad = True
 
     if factorization:
