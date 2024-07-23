@@ -75,12 +75,13 @@ def infer_batch(audio_wavs, prefix="", input_language="en", task="transcribe", a
     memory_prefix = " "
 
     if memory_words is not None and len(memory_words) > 0:
+        #print(memory_words)
         memory_words = [memory_prefix+w for w in memory_words]
 
         memory = processor.tokenizer(memory_words, return_tensors="pt", padding=True)
         memory["input_ids"] = memory["input_ids"][:,4:].to(device)
         memory["attention_mask"] = memory["attention_mask"][:,4:].to(device)
-        print([[processor.tokenizer.decode(i) for i in memory["input_ids"][j]] for j in range(len(memory["input_ids"]))])
+        #print([[processor.tokenizer.decode(i) for i in memory["input_ids"][j]] for j in range(len(memory["input_ids"]))])
         #print(memory["attention_mask"])
     else:
         memory = None

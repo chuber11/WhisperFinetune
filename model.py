@@ -363,6 +363,13 @@ class EncoderMemory(nn.Module):
         if memory is None:
             return self.no_entry_found, None, None, None
 
+        if not self.training and \
+           hasattr(self, "last_memory") and \
+           self.last_memory["input_ids"].shape == memory["input_ids"].shape and \
+           self.last_memory["input_ids"].eq(memory["input_ids"]).all():
+            #print("Using encoded memory cache")
+            return self.encoded_memory_cache
+
         memory_text_embeds, memory_text_mask = self.decoder[0].embed_tokens(memory["input_ids"]), memory["attention_mask"]
         if self.linear is not None:
             memory_text_embeds_ = 3 * self.linear(memory_text_embeds)
@@ -386,7 +393,13 @@ class EncoderMemory(nn.Module):
 
         encoder_output_memory = torch.cat([self.no_entry_found, encoder_output_memory_wonef],0) # (n_mem+1) x d_model
 
-        return encoder_output_memory, memory_text_enc, memory_text_embeds, memory_text_mask
+        res = [encoder_output_memory, memory_text_enc, memory_text_embeds, memory_text_mask]
+        
+        if not self.training:
+            self.last_memory = memory
+            self.encoded_memory_cache = res
+
+        return res
 
 @dataclass
 class Seq2SeqModelOutputMemory(Seq2SeqModelOutput):
@@ -718,7 +731,7 @@ class WhisperForConditionalGenerationMemoryWrapper(WhisperForConditionalGenerati
                     module.enable_adapters(enabled=True)
         memory = model_kwargs["memory"] if "memory" in model_kwargs else None
         memory = self.model.encoder_memory(memory)
-        print("2) Encoded memory of size", len(memory[0])-1)
+        #print("2) Encoded memory of size", len(memory[0])-1)
         model_kwargs["encoder_outputs"] = BaseModelOutputMemory(*model_kwargs["encoder_outputs"].values(),memory=memory, encoder_outputs_memory=encoder_outputs_memory)
         #print(model_kwargs["encoder_outputs"])
         return model_kwargs
