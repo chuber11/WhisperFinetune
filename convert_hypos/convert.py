@@ -9,6 +9,7 @@ from glob import glob
 import re
 import getpass
 import jiwer
+from load_save import load_dict, save_dict
 
 def response2output(response):
     output = json.loads(response)["choices"][0]["message"]["content"]
@@ -83,7 +84,8 @@ def run_llm(utterance, model="gpt-4-turbo-preview", max_tokens=512, number=0):
     if key not in outputs:
         global client
         if client is None:
-            client = OpenAI(api_key=getpass.getpass("Enter your api_key: "))
+            #client = OpenAI(api_key=getpass.getpass("Enter your api_key: "))
+            client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
         print("Doing request", prompt, utterance)
 
@@ -121,8 +123,7 @@ def run_llm(utterance, model="gpt-4-turbo-preview", max_tokens=512, number=0):
         response = response.model_dump_json()
 
         outputs[key] = response
-        torch.save(outputs, "outputs_convert_new.pt")
-        os.rename("outputs_convert_new.pt","outputs_convert.pt")
+        save_dict(outputs, "outputs_converted.pt")
     else:
         response = outputs[key]
 
@@ -134,24 +135,18 @@ def run_llm(utterance, model="gpt-4-turbo-preview", max_tokens=512, number=0):
     output = response[0]
 
     wer = jiwer.wer(output, utterance)
-    if wer > 0.5:
+    if wer > 1.0:
+        print(f"WARNING: WER > 1.0! Using input instead of {output = }")
         output = utterance
-        print("WARNING: WER > 0.5! Using input as output")
 
     return output
 
 price = 0
 client = None
+outputs = load_dict("outputs_converted.pt")
 
 if __name__ == "__main__":
     random.seed(42)
-
-    try:
-        outputs = torch.load("outputs_convert.pt")
-    except:
-        print("No outputs found, continue?")
-        breakpoint()
-        outputs = {}
 
     number = 3
     #model = "gpt-3.5-turbo"
