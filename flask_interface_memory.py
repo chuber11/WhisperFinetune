@@ -47,14 +47,17 @@ def initialize(user=None):
     #model = WhisperForConditionalGeneration.from_pretrained(model_path)
 
     if user is not None:
-        peft_dir = sorted(glob(f"saves/model_CL_{user}_*"))[-1]
-        peft_model = glob(f"{peft_dir}/checkpoint-*")[0]
+        peft_dirs = sorted(glob(f"saves/model_CL_{user}_*"))
+        if len(peft_dirs) > 0:
+            peft_dir = glob(f"{peft_dirs[-1]}/checkpoint-*")
+            if len(peft_dir) > 0:
+                peft_model = peft_dir[0]
 
-        print(f"Loading factorization model {peft_model} for {user = }..:")
+                print(f"Loading factorization model {peft_model} for {user = }...")
 
-        from peft import PeftModel
-        model = PeftModel.from_pretrained(model, peft_model)
-        model = model.merge_and_unload()
+                from peft import PeftModel
+                model = PeftModel.from_pretrained(model, peft_model)
+                model = model.merge_and_unload()
 
     model.generation_config.suppress_tokens = [t for t in model.generation_config.suppress_tokens if t!=25] # allow for : to be decoded
     model.generation_config.begin_suppress_tokens.remove(50257)
