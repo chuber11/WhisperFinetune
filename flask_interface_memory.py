@@ -46,6 +46,8 @@ def initialize(user=None):
     model = WhisperForConditionalGenerationMemory.from_pretrained(model_path)
     #model = WhisperForConditionalGeneration.from_pretrained(model_path)
 
+    initialize_output["peft_model"] = False
+
     if user is not None:
         peft_dirs = sorted(glob(f"saves/model_CL_{user}_*"))
         if len(peft_dirs) > 0:
@@ -58,6 +60,8 @@ def initialize(user=None):
                 from peft import PeftModel
                 model = PeftModel.from_pretrained(model, peft_model)
                 model = model.merge_and_unload()
+
+                initialize_output["peft_model"] = True
 
     model.generation_config.suppress_tokens = [t for t in model.generation_config.suppress_tokens if t!=25] # allow for : to be decoded
     model.generation_config.begin_suppress_tokens.remove(50257)
@@ -262,7 +266,7 @@ def inference(input_language, output_language):
     except:
         priority = 0
 
-    run_baseline = False
+    run_baseline = initialize_output["peft_model"]
 
     if run_baseline:
         result_queue = queue.Queue()
