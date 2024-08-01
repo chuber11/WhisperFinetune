@@ -24,3 +24,5 @@ all_number_scores.txt
 data_numbers_human_train/*
 hypos*/*
 data*/*
+LT_CL/data*
+LT_CL/last_run_day_*

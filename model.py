@@ -136,8 +136,10 @@ class WhisperDecoderLayerMemory(WhisperDecoderLayer):
                                                         memory_text_enc=memory_text_embeds,
                                                         memory_text_mask=memory_text_mask)
         else:
-            key_value_states = encoder_output_memory.unsqueeze(0).expand(hidden_states.shape[0],-1,-1)
-            hidden_states = self.memory_entry_attn(hidden_states=hidden_states, key_value_states=key_value_states)[0]
+            topk = 5
+            entry_indices = cross_attn_weights.topk(topk,dim=-1)[1].view(-1,1).expand(-1,encoder_output_memory.shape[-1]) # b*l_tgt*topk x d_model
+            key_value_states = encoder_output_memory.gather(0, entry_indices).view(cross_attn_weights.shape[0]*cross_attn_weights.shape[1],topk,-1)
+            hidden_states = self.memory_entry_attn(hidden_states=hidden_states.view(-1,1,hidden_states.shape[-1]), key_value_states=key_value_states)[0].view(*cross_attn_weights.shape[:2],-1)
 
         if hidden_states is not None:
             hidden_states = nn.functional.dropout(hidden_states, p=self.dropout, training=self.training)
@@ -706,6 +708,8 @@ class WhisperForConditionalGenerationMemoryWrapper(WhisperForConditionalGenerati
             del model_kwargs["encoder_outputs_memory"]
         encoder_outputs_memory = None
         if hasattr(self.model.encoder.layers[0].self_attn.k_proj,"lora_A"): # LORA -> have to run encoder without lora weights
+            #print("Running encoder twice...")
+
             encoder = self.get_encoder()
             irrelevant_prefix = ["decoder_", "cross_attn", "use_cache"]
             encoder_kwargs = {

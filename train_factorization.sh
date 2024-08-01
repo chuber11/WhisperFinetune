@@ -1,7 +1,8 @@
 
 model_name="${2:-bw}"
 load="${3:-./saves/model7/checkpoint-7300}"
-dataset_factor=10000
+dataset_factor=${4:-10000}
+user="${5:-admin@example.com}"
 
 clear
 
@@ -23,14 +24,14 @@ fi
 
 python -u train.py --model_path ./saves/model_$model_name \
     --load $load \
-    --segfiles "../WhisperE+Phi2/data/cv.*.train.seg.aligned" "/project/OML/chuber/2023/data/earnings_nw_dataset/aligned_21/nw.dev.train.*.seg.aligned" "/project/OML/chuber/2023/data/earnings_nw_dataset/aligned_21/nw.test.train.*.seg.aligned" \
+    --segfiles "../WhisperE+Phi2/data/cv.*.train.seg.aligned" "/project/OML/chuber/2023/data/earnings_nw_dataset/aligned_21/nw.dev.train.*.seg.aligned" "LT_CL/data_processed_admin@example.com/*.train.seg.aligned" \
 	--dataset_factors 1 $dataset_factor $dataset_factor \
-    --segfiles_dev "/project/OML/chuber/2023/data/earnings_nw_dataset/aligned_21/nw.dev.test.seg.aligned"\
+    --segfiles_dev "/project/OML/chuber/2023/data/earnings_nw_dataset/aligned_21/nw.dev.test.seg.aligned" "LT_CL/data_processed_admin@example.com/*.dev.seg.aligned" \
     --warmup_steps 0 --learning_rate 1e-5 \
     --log_steps 10 \
     --eval_steps 10 \
     `#--gradient_checkpointing` \
-    --factorization_rank 16 `#--factorization_only_decoder` \
+    --factorization_rank 16 --factorization_only_decoder \
     --batch_size 4 --gradient_accumulation_steps 8 \
     | tee $logfile
 

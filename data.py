@@ -47,6 +47,8 @@ class MyDataset(Dataset):
             labelfile = ".".join(segfile.split(".")[:-2])+".cased"
             if not os.path.isfile(labelfile):
                 labelfile = labelfile[:-len(".cased")]+".ref"
+                if not os.path.isfile(labelfile):
+                    labelfile = labelfile[:-len(".ref")]+".hypo"
             if not os.path.isfile(labelfile):
                 if not test:
                     raise FileNotFoundError
