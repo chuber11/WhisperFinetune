@@ -143,21 +143,23 @@ def use_model(reqs):
     input_languages = list()
     output_languages = list()
     memory_wordss = list()
+    num_beamss = list()
 
     batch_runnable = False
 
     for req in reqs:
-        audio_tensor, prefix, input_language, output_language, memory_words, user = req.get_data()
+        audio_tensor, prefix, input_language, output_language, memory_words, user, num_beams = req.get_data()
         audio_tensors.append(audio_tensor)
         prefixes.append(prefix)
         input_languages.append(input_language)
         output_languages.append(output_language)
         memory_wordss.append(tuple(memory_words) if memory_words is not None else memory_words)
+        num_beamss.append(num_beams)
 
         if user != initialize_output["user"]:
             initialize(user)
 
-    if len(set(prefixes)) == 1 and len(set(input_languages)) == 1 and len(set(output_languages)) == 1 and len(set(memory_wordss)) == 1:
+    if len(set(prefixes)) == 1 and len(set(input_languages)) == 1 and len(set(output_languages)) == 1 and len(set(memory_wordss)) == 1 and len(set(num_beamss)) == 1:
         batch_runnable = True
 
     if batch_runnable:
@@ -170,14 +172,14 @@ def use_model(reqs):
                 result = {"hypo": "", "status":400, "message": 'Wrong option. Perform X->X "transcribe" or X->English "translate". Found {} -> {}'.format(input_languages[0], output_languages[0])}
                 req.publish(result)
             return
-        hypos, lids = infer_batch(audio_wavs=audio_tensors, input_language=input_languages[0], task=task, prefix=prefixes[0], memory_words=memory_wordss[0])
+        hypos, lids = infer_batch(audio_wavs=audio_tensors, input_language=input_languages[0], task=task, prefix=prefixes[0], memory_words=memory_wordss[0], num_beams=num_beamss[0])
 
         for req, hypo, lid in zip(reqs, hypos, lids):
             result = {"hypo": hypo.strip(), "lid":lid}
             req.publish(result)
     else:
-        for req, audio_tensor, prefix, input_language, output_language, memory_words \
-                in zip(reqs, audio_tensors, prefixes, input_languages, output_languages, memory_wordss):
+        for req, audio_tensor, prefix, input_language, output_language, memory_words, num_beams \
+                in zip(reqs, audio_tensors, prefixes, input_languages, output_languages, memory_wordss, num_beamss):
             if input_language == output_language:
                 task = "transcribe"
             elif output_language == 'en':
@@ -186,7 +188,7 @@ def use_model(reqs):
                 result = {"hypo": "", "status":400, "message": 'Wrong option. Perform X->X "transcribe" or X->English "translate". Found {} -> {}'.format(input_language, output_language)}
                 req.publish(result)
                 continue
-            hypo, lid = infer_batch(audio_wavs=[audio_tensor], input_language=input_language, task=task, prefix=prefix, memory_words=memory_words)
+            hypo, lid = infer_batch(audio_wavs=[audio_tensor], input_language=input_language, task=task, prefix=prefix, memory_words=memory_words, num_beams=num_beams)
             result = {"hypo": hypo[0].strip(), "lid":lid[0]}
             req.publish(result)
 
@@ -260,6 +262,12 @@ def inference(input_language, output_language):
     if user is not None:
         user: str = user.read().decode("utf-8")
 
+    num_beams = request.files.get("num_beams") # can be None
+    try:
+        num_beams = int(num_beams.read()) # used together with priority queue
+    except:
+        num_beams = 4
+
     priority = request.files.get("priority") # can be None
     try:
         priority = int(priority.read()) # used together with priority queue
@@ -285,7 +293,7 @@ def inference(input_language, output_language):
     condition = threading.Condition()
     with condition:
         id = str(uuid.uuid4())
-        data = (audio_tensor,prefix,input_language,output_language,memory,user)
+        data = (audio_tensor,prefix,input_language,output_language,memory,user, num_beams)
 
         queue_in.put(Priority(priority,id,condition,data))
 
