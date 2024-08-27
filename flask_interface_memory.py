@@ -24,6 +24,15 @@ app = Flask(__name__)
 
 initialize_output = {}
 
+def get_latest_adaptation_path(user):
+    peft_model = None
+    peft_dirs = sorted(glob(f"saves/model_CL_{user}_*"))
+    if len(peft_dirs) > 0:
+        peft_dir = glob(f"{peft_dirs[-1]}/checkpoint-*")
+        if len(peft_dir) > 0:
+            peft_model = peft_dir[0]
+    return peft_model
+
 def initialize(user=None):
     if "model" in initialize_output:
         model = initialize_output.pop("model")
@@ -40,28 +49,24 @@ def initialize(user=None):
     #model_path = "saves/model_newwords6/checkpoint-50000"
     #model_path = "saves/model_newwords7/checkpoint-158000"
     #model_path = "saves/model_newwords8/checkpoint-199000"
-    model_path = "saves/model_newwords10/checkpoint-166000"
-    #model_path = "saves/model_newwords11_2/checkpoint-198000"
+    #model_path = "saves/model_newwords10_2/checkpoint-175000"
+    model_path = "saves/model_newwords11_3/checkpoint-186000"
 
     model = WhisperForConditionalGenerationMemory.from_pretrained(model_path)
     #model = WhisperForConditionalGeneration.from_pretrained(model_path)
 
-    initialize_output["peft_model"] = False
+    initialize_output["peft_model"] = None
 
     if user is not None:
-        peft_dirs = sorted(glob(f"saves/model_CL_{user}_*"))
-        if len(peft_dirs) > 0:
-            peft_dir = glob(f"{peft_dirs[-1]}/checkpoint-*")
-            if len(peft_dir) > 0:
-                peft_model = peft_dir[0]
+        peft_model = get_latest_adaptation_path(user)
 
-                print(f"Loading factorization model {peft_model} for {user = }...")
+        print(f"Loading factorization model {peft_model} for {user = }...")
 
-                from peft import PeftModel
-                model = PeftModel.from_pretrained(model, peft_model)
-                model = model.merge_and_unload()
+        from peft import PeftModel
+        model = PeftModel.from_pretrained(model, peft_model)
+        model = model.merge_and_unload()
 
-                initialize_output["peft_model"] = True
+        initialize_output["peft_model"] = peft_model
 
     model.generation_config.suppress_tokens = [t for t in model.generation_config.suppress_tokens if t!=25] # allow for : to be decoded
     model.generation_config.begin_suppress_tokens.remove(50257)
@@ -159,7 +164,7 @@ def use_model(reqs):
         num_beamss.append(num_beams)
         force_languages.append(force_language)
 
-        if user != initialize_output["user"]:
+        if user != initialize_output["user"] or get_latest_adaptation_path(user) != initialize_output["peft_model"]:
             initialize(user)
 
     if len(set(prefixes)) == 1 and len(set(input_languages)) == 1 and len(set(output_languages)) == 1 and len(set(memory_wordss)) == 1 and len(set(num_beamss)) == 1 and len(set(force_languages)) == 1:
@@ -269,7 +274,7 @@ def inference(input_language, output_language):
     try:
         num_beams = int(num_beams.read()) # used together with priority queue
     except:
-        num_beams = 4
+        num_beams = 1
 
     force_language = request.files.get("force_language") # can be None
     try:
