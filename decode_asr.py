@@ -133,7 +133,7 @@ for i in tqdm(range(0,len(dataset),batch_size)):
                     for word in words:
                         if num >= args.memory_num_distractors:
                             break
-                        if word not in memory_words:
+                        if prefix+word not in memory_words:
                             memory_words.append(prefix+word)
                             num += 1
                     if num >= args.memory_num_distractors:

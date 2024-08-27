@@ -24,9 +24,9 @@ fi
 
 python -u train.py --model_path ./saves/model_$model_name \
     --load $load \
-    --segfiles "../WhisperE+Phi2/data/cv.*.train.seg.aligned" "/project/OML/chuber/2023/data/earnings_nw_dataset/aligned_21/nw.dev.train.*.seg.aligned" "LT_CL/data_processed_admin@example.com/*.train.seg.aligned" \
+    --segfiles "../WhisperE+Phi2/data/cv.*.train.seg.aligned" "/project/OML/chuber/2023/data/earnings_nw_dataset/aligned_21/nw.dev.train.*.seg.aligned" "LT_CL/data_processed_$user/*.train.seg.aligned" \
 	--dataset_factors 1 $dataset_factor $dataset_factor \
-    --segfiles_dev "/project/OML/chuber/2023/data/earnings_nw_dataset/aligned_21/nw.dev.test.seg.aligned" "LT_CL/data_processed_admin@example.com/*.dev.seg.aligned" \
+    --segfiles_dev "/project/OML/chuber/2023/data/earnings_nw_dataset/aligned_21/nw.dev.test.seg.aligned" "LT_CL/data_processed_$user/*.dev.seg.aligned" \
     --warmup_steps 0 --learning_rate 1e-5 \
     --log_steps 10 \
     --eval_steps 10 \

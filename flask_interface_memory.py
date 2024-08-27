@@ -84,9 +84,10 @@ def initialize(user=None):
     initialize_output["model"] = model
     initialize_output["processor"] = processor
 
-def get_forced_decoder_ids(processor, prefix, task, device):
+def get_forced_decoder_ids(processor, prefix, task, device, force_language):
     forced_decoder_ids = processor.get_decoder_prompt_ids(language="en", task=task) # <|en|><|transcribe|><|notimestamps|>
-    forced_decoder_ids[0] = (forced_decoder_ids[0][0],None) # Unset language
+    if force_language == 0:
+        forced_decoder_ids[0] = (forced_decoder_ids[0][0],None) # Unset language
     if len(prefix) > 0:
         ids = processor.get_prompt_ids(prefix).tolist()[1:]
         for id in ids:
@@ -95,7 +96,7 @@ def get_forced_decoder_ids(processor, prefix, task, device):
     #print(forced_decoder_ids)
     return forced_decoder_ids
 
-def infer_batch(audio_wavs, prefix="", input_language="en", task="transcribe", audio_sample_rate=16000, memory_words=None, num_beams=4):
+def infer_batch(audio_wavs, prefix="", input_language="en", task="transcribe", audio_sample_rate=16000, memory_words=None, num_beams=4, force_language=0):
     model = initialize_output["model"]
     processor = initialize_output["processor"]
 
@@ -113,12 +114,12 @@ def infer_batch(audio_wavs, prefix="", input_language="en", task="transcribe", a
         memory = processor.tokenizer(memory_words, return_tensors="pt", padding=True)
         memory["input_ids"] = memory["input_ids"][:,4:].to(device)
         memory["attention_mask"] = memory["attention_mask"][:,4:].to(device)
-        print([[processor.tokenizer.decode(i) for i in memory["input_ids"][j]] for j in range(len(memory["input_ids"]))])
+        #print([[processor.tokenizer.decode(i) for i in memory["input_ids"][j]] for j in range(len(memory["input_ids"]))])
         #print(memory["attention_mask"])
     else:
         memory = None
 
-    forced_decoder_ids = get_forced_decoder_ids(processor, prefix, task, device)
+    forced_decoder_ids = get_forced_decoder_ids(processor, prefix, task, device, force_language)
     model.generation_config.forced_decoder_ids = forced_decoder_ids
 
     predicted_ids = model.generate(
@@ -144,22 +145,24 @@ def use_model(reqs):
     output_languages = list()
     memory_wordss = list()
     num_beamss = list()
+    force_languages = list()
 
     batch_runnable = False
 
     for req in reqs:
-        audio_tensor, prefix, input_language, output_language, memory_words, user, num_beams = req.get_data()
+        audio_tensor, prefix, input_language, output_language, memory_words, user, num_beams, force_language = req.get_data()
         audio_tensors.append(audio_tensor)
         prefixes.append(prefix)
         input_languages.append(input_language)
         output_languages.append(output_language)
         memory_wordss.append(tuple(memory_words) if memory_words is not None else memory_words)
         num_beamss.append(num_beams)
+        force_languages.append(force_language)
 
         if user != initialize_output["user"]:
             initialize(user)
 
-    if len(set(prefixes)) == 1 and len(set(input_languages)) == 1 and len(set(output_languages)) == 1 and len(set(memory_wordss)) == 1 and len(set(num_beamss)) == 1:
+    if len(set(prefixes)) == 1 and len(set(input_languages)) == 1 and len(set(output_languages)) == 1 and len(set(memory_wordss)) == 1 and len(set(num_beamss)) == 1 and len(set(force_languages)) == 1:
         batch_runnable = True
 
     if batch_runnable:
@@ -172,14 +175,14 @@ def use_model(reqs):
                 result = {"hypo": "", "status":400, "message": 'Wrong option. Perform X->X "transcribe" or X->English "translate". Found {} -> {}'.format(input_languages[0], output_languages[0])}
                 req.publish(result)
             return
-        hypos, lids = infer_batch(audio_wavs=audio_tensors, input_language=input_languages[0], task=task, prefix=prefixes[0], memory_words=memory_wordss[0], num_beams=num_beamss[0])
+        hypos, lids = infer_batch(audio_wavs=audio_tensors, input_language=input_languages[0], task=task, prefix=prefixes[0], memory_words=memory_wordss[0], num_beams=num_beamss[0], force_language=force_languages[0])
 
         for req, hypo, lid in zip(reqs, hypos, lids):
             result = {"hypo": hypo.strip(), "lid":lid}
             req.publish(result)
     else:
-        for req, audio_tensor, prefix, input_language, output_language, memory_words, num_beams \
-                in zip(reqs, audio_tensors, prefixes, input_languages, output_languages, memory_wordss, num_beamss):
+        for req, audio_tensor, prefix, input_language, output_language, memory_words, num_beams, force_language \
+                in zip(reqs, audio_tensors, prefixes, input_languages, output_languages, memory_wordss, num_beamss, force_languages):
             if input_language == output_language:
                 task = "transcribe"
             elif output_language == 'en':
@@ -188,7 +191,7 @@ def use_model(reqs):
                 result = {"hypo": "", "status":400, "message": 'Wrong option. Perform X->X "transcribe" or X->English "translate". Found {} -> {}'.format(input_language, output_language)}
                 req.publish(result)
                 continue
-            hypo, lid = infer_batch(audio_wavs=[audio_tensor], input_language=input_language, task=task, prefix=prefix, memory_words=memory_words, num_beams=num_beams)
+            hypo, lid = infer_batch(audio_wavs=[audio_tensor], input_language=input_language, task=task, prefix=prefix, memory_words=memory_words, num_beams=num_beams, force_language=force_language)
             result = {"hypo": hypo[0].strip(), "lid":lid[0]}
             req.publish(result)
 
@@ -268,6 +271,12 @@ def inference(input_language, output_language):
     except:
         num_beams = 4
 
+    force_language = request.files.get("force_language") # can be None
+    try:
+        force_language = int(force_language.read()) # used together with priority queue
+    except:
+        force_language = 0
+
     priority = request.files.get("priority") # can be None
     try:
         priority = int(priority.read()) # used together with priority queue
@@ -293,7 +302,7 @@ def inference(input_language, output_language):
     condition = threading.Condition()
     with condition:
         id = str(uuid.uuid4())
-        data = (audio_tensor,prefix,input_language,output_language,memory,user, num_beams)
+        data = (audio_tensor,prefix,input_language,output_language,memory,user, num_beams, force_language)
 
         queue_in.put(Priority(priority,id,condition,data))
 

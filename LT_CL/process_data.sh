@@ -2,10 +2,12 @@
 user=${1:-admin@example.com}
 GPU=${2:-2}
 
-python transcribe.py $user
-
 export CUDA_VISIBLE_DEVICES=$GPU
-python generate_segments.py $user
+
+#python transcribe.py $user
+#python generate_segments.py $user
+
+python run_shas.py $user
 
 python transcribe_memory.py $user
 

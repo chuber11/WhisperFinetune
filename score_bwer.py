@@ -10,7 +10,7 @@ from enum import Enum
 import argparse
 import logging
 import json
-
+from data_filtered_test.create_memory_testset import replace_except_specified_chars
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
@@ -52,7 +52,7 @@ class WordError(object):
 
     def get_result_string(self):
         return (
-            f"error_rate={self.get_wer()}, "
+            f"error_rate={self.get_wer():.1f}, "
             f"ref_words={self.ref_words}, "
             f"subs={self.errors[Code.substitution]}, "
             f"ins={self.errors[Code.insertion]}, "
@@ -251,9 +251,14 @@ def main(args):
     for uttid in refs:
         if uttid not in hyps:
             continue
-        ref_tokens = refs[uttid]["text"].split()
-        biasing_words = refs[uttid]["biasing_words"]
-        hyp_tokens = hyps[uttid].split()
+        if not args.lowercase:
+            ref_tokens = replace_except_specified_chars(refs[uttid]["text"]).split()
+            biasing_words = refs[uttid]["biasing_words"]
+            hyp_tokens = replace_except_specified_chars(hyps[uttid]).split()
+        else:
+            ref_tokens = [w.lower() for w in replace_except_specified_chars(refs[uttid]["text"]).split()]
+            biasing_words = set(w.lower() for w in refs[uttid]["biasing_words"])
+            hyp_tokens = [w.lower() for w in replace_except_specified_chars(hyps[uttid]).split()]
         ed = EditDistance()
         result = ed.align(ref_tokens, hyp_tokens)
         for code, ref_idx, hyp_idx in zip(result.codes, result.refs, result.hyps):
@@ -315,6 +320,7 @@ if __name__ ==  "__main__":
         help="If set, hyps doesn't have to cover all of refs.",
     )
     parser.add_argument("--biasing_list")
+    parser.add_argument("--lowercase", action="store_true")
     args = parser.parse_args()
     main(args)
 

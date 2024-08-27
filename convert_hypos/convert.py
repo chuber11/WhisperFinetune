@@ -127,19 +127,19 @@ def run_llm(utterance, model="gpt-4-turbo-preview", max_tokens=512, number=0):
     else:
         response = outputs[key]
 
-    response = response2output(response).strip().split("\n")
-    if len(response) > 1:
+    res = response2output(response).strip().split("\n")
+    if len(res) > 1:
         print("WARNING: Result contains multiple lines! Using input as output")
         output = utterance
         return output
-    output = response[0]
+    output = res[0]
 
     wer = jiwer.wer(output, utterance)
     if wer > 1.0:
         print(f"WARNING: WER > 1.0! Using input instead of {output = }")
         output = utterance
 
-    return output
+    return output, json.loads(response)["usage"]
 
 price = 0
 client = None
@@ -172,7 +172,7 @@ if __name__ == "__main__":
                 line = line.strip().split()
                 id, hypo = line[0], " ".join(line[1:])
 
-                response = run_llm(hypo, number=number, model=model)
+                response, _ = run_llm(hypo, number=number, model=model)
                 outfile.write(f"{id} {response}\n")
 
                 #if i > 200:
