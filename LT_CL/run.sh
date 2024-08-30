@@ -2,10 +2,10 @@
 set -x
 
 GPU=${1:-2}
+user=${2:-christian.huber@kit.edu}
+#user="alexander.waibel@kit.edu"
 server="30"
 pipeline="ltpipeline-dev"
-user="christian.huber@kit.edu"
-#user="alexander.waibel@kit.edu"
 dataset_factor="10000"
 
 mkdir -p data_to_process_$user
