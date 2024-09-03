@@ -50,7 +50,8 @@ def initialize(user=None):
     #model_path = "saves/model_newwords7/checkpoint-158000"
     #model_path = "saves/model_newwords8/checkpoint-199000"
     #model_path = "saves/model_newwords10_2/checkpoint-175000"
-    model_path = "saves/model_newwords11_3/checkpoint-186000"
+    #model_path = "saves/model_newwords11_3/checkpoint-186000"
+    model_path = "saves/model_newwords13/checkpoint-114000"
 
     model = WhisperForConditionalGenerationMemory.from_pretrained(model_path)
     #model = WhisperForConditionalGeneration.from_pretrained(model_path)
@@ -77,7 +78,7 @@ def initialize(user=None):
     model.load_state_dict(model2.state_dict(),strict=False)
     del model2"""
 
-    max_batch_size = 1
+    max_batch_size = 4
 
     if torch.cuda.is_available():
         model = model.cuda()

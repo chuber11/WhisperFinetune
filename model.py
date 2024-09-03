@@ -50,10 +50,10 @@ class WhisperDecoderLayerMemory(WhisperDecoderLayer):
     def __init__(self, config: WhisperConfig):
         super().__init__(config)
 
-        for p in self.self_attn.parameters():
-            p.requires_grad = False
-        for p in self.encoder_attn.parameters():
-            p.requires_grad = False
+        for module in [self.self_attn, self.encoder_attn, self.fc1, self.fc2]:
+        #for module in [self.self_attn, self.encoder_attn]:
+            for p in module.parameters():
+                p.requires_grad = False
 
         self.memory_attn = AttentionMemory(self.embed_dim)
         self.memory_layer_norm = nn.LayerNorm(self.embed_dim)
@@ -61,8 +61,6 @@ class WhisperDecoderLayerMemory(WhisperDecoderLayer):
         self.entry_norm = False
         if self.entry_norm:
             self.memory_entry_attn_layer_norm = nn.LayerNorm(self.embed_dim)
-
-        self.use_memory_entry_attn = True
 
         self.memory_entry_attn = WHISPER_ATTENTION_CLASSES[config._attn_implementation](
             self.embed_dim,
@@ -76,7 +74,7 @@ class WhisperDecoderLayerMemory(WhisperDecoderLayer):
         b, l_tar, _ = mem_attn_out.shape
 
         if memory_text_enc is None:
-            return
+            return None,None
 
         mem_attn_out = mem_attn_out[:, :, :memory_text_enc.shape[1] + 1].argmax(-1).view(-1) - 1 # b*l_tar
 
@@ -92,16 +90,16 @@ class WhisperDecoderLayerMemory(WhisperDecoderLayer):
             key_value_states = memory_text_enc[mem_attn_out] # mask.sum() x l_mem x d_model
             attention_mask = memory_text_mask[mem_attn_out].unsqueeze(1).unsqueeze(1) # mask.sum() x 1 x 1 x l_mem
 
-            memory_entry_attn = self.memory_entry_attn(hidden_states=hidden_states, key_value_states=key_value_states, attention_mask=attention_mask)[0] # mask.sum() x 1 x d_model
+            memory_entry_attn, _, memory_attn_present_key_value = self.memory_entry_attn(hidden_states=hidden_states, key_value_states=key_value_states, attention_mask=attention_mask) # mask.sum() x 1 x d_model
             if self.entry_norm:
                 memory_entry_attn = self.memory_entry_attn_layer_norm(memory_entry_attn)
 
             output = torch.zeros_like(dec_output, dtype=memory_entry_attn.dtype) # b*l_tar x d_model
             output[indices] = memory_entry_attn[:,0]
 
-            return output.view(b, l_tar, -1) # b x l_tar x d_model
+            return output.view(b, l_tar, -1), memory_attn_present_key_value # b x l_tar x d_model
         else:
-            return
+            return None, None
 
     def forward(
         self,
@@ -116,30 +114,61 @@ class WhisperDecoderLayerMemory(WhisperDecoderLayer):
         use_cache: Optional[bool] = True,
         memory = None):
 
-        outputs = super().forward(hidden_states=hidden_states, attention_mask=attention_mask, encoder_hidden_states=encoder_hidden_states, encoder_attention_mask=encoder_attention_mask, layer_head_mask=layer_head_mask, cross_attn_layer_head_mask=cross_attn_layer_head_mask, past_key_value=past_key_value, output_attentions=output_attentions, use_cache=use_cache)
-        hidden_states = outputs[0]
-
         residual = hidden_states
+        hidden_states = self.self_attn_layer_norm(hidden_states)
 
+        # Self Attention
+        # decoder uni-directional self-attention cached key/values tuple is at positions 1,2
+        self_attn_past_key_value = past_key_value[:2] if past_key_value is not None else None
+        # add present self-attn cache to positions 1,2 of present_key_value tuple
+        hidden_states, self_attn_weights, present_key_value = self.self_attn(
+            hidden_states=hidden_states,
+            past_key_value=self_attn_past_key_value,
+            attention_mask=attention_mask,
+            layer_head_mask=layer_head_mask,
+            output_attentions=output_attentions,
+        )
+        hidden_states = nn.functional.dropout(hidden_states, p=self.dropout, training=self.training)
+        hidden_states = residual + hidden_states
+
+        # Cross-Attention Block
+        cross_attn_present_key_value = None
+        cross_attn_weights = None
+        if encoder_hidden_states is not None:
+            residual = hidden_states
+            hidden_states = self.encoder_attn_layer_norm(hidden_states)
+
+            # cross_attn cached key/values tuple is at positions 3,4 of present_key_value tuple
+            cross_attn_past_key_value = past_key_value[2:4] if past_key_value is not None else None
+            hidden_states, cross_attn_weights, cross_attn_present_key_value = self.encoder_attn(
+                hidden_states=hidden_states,
+                key_value_states=encoder_hidden_states,
+                attention_mask=encoder_attention_mask,
+                layer_head_mask=cross_attn_layer_head_mask,
+                past_key_value=cross_attn_past_key_value,
+                output_attentions=output_attentions,
+            )
+            hidden_states = nn.functional.dropout(hidden_states, p=self.dropout, training=self.training)
+            hidden_states = residual + hidden_states
+
+            # add cross-attn to positions 3,4 of present_key_value tuple
+            present_key_value = present_key_value + cross_attn_present_key_value
+
+        # Memory-Attention
+        residual = hidden_states
         hidden_states = self.memory_layer_norm(hidden_states)
 
         encoder_output_memory, memory_text_enc, memory_text_embeds, memory_text_mask = memory
 
-        cross_attn_weights = self.memory_attn(hidden_states, encoder_output_memory) # b x l_tgt x (n_mem+1)
-        #if cross_attn_weights.argmax(-1).gt(0).any():
-        #    print(cross_attn_weights.argmax(-1))
-        #    print(F.softmax(cross_attn_weights,-1)[:,:,-1])
-
-        if self.use_memory_entry_attn:
-            hidden_states = self.calc_memory_entry_attn(dec_output=hidden_states,
-                                                        mem_attn_out=cross_attn_weights,
-                                                        memory_text_enc=memory_text_embeds,
-                                                        memory_text_mask=memory_text_mask)
-        else:
-            topk = 5
-            entry_indices = cross_attn_weights.topk(topk,dim=-1)[1].view(-1,1).expand(-1,encoder_output_memory.shape[-1]) # b*l_tgt*topk x d_model
-            key_value_states = encoder_output_memory.gather(0, entry_indices).view(cross_attn_weights.shape[0]*cross_attn_weights.shape[1],topk,-1)
-            hidden_states = self.memory_entry_attn(hidden_states=hidden_states.view(-1,1,hidden_states.shape[-1]), key_value_states=key_value_states)[0].view(*cross_attn_weights.shape[:2],-1)
+        memory_attn_weights = self.memory_attn(hidden_states, encoder_output_memory) # b x l_tgt x (n_mem+1)
+        #if memory_attn_weights.argmax(-1).gt(0).any():
+        #    print(memory_attn_weights.argmax(-1))
+        #    print(F.softmax(memory_attn_weights,-1)[:,:,-1])
+        
+        hidden_states, memory_attn_present_key_value = self.calc_memory_entry_attn(dec_output=hidden_states,
+                                                    mem_attn_out=memory_attn_weights,
+                                                    memory_text_enc=memory_text_embeds,
+                                                    memory_text_mask=memory_text_mask)
 
         if hidden_states is not None:
             hidden_states = nn.functional.dropout(hidden_states, p=self.dropout, training=self.training)
@@ -147,7 +176,21 @@ class WhisperDecoderLayerMemory(WhisperDecoderLayer):
         else:
             hidden_states = residual
 
-        outputs = (hidden_states, *outputs[1:], cross_attn_weights)
+        # Fully Connected
+        residual = hidden_states
+        hidden_states = self.final_layer_norm(hidden_states)
+        hidden_states = self.activation_fn(self.fc1(hidden_states))
+        hidden_states = nn.functional.dropout(hidden_states, p=self.activation_dropout, training=self.training)
+        hidden_states = self.fc2(hidden_states)
+        hidden_states = nn.functional.dropout(hidden_states, p=self.dropout, training=self.training)
+        hidden_states = residual + hidden_states
+
+        outputs = (hidden_states,)
+        if output_attentions:
+            outputs += (self_attn_weights, cross_attn_weights)
+        if use_cache:
+            outputs += (present_key_value,)
+        outputs += (memory_attn_weights,)
         return outputs
 
 class WhisperDecoderMemory(WhisperDecoder):
