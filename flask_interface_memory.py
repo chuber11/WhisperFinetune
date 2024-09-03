@@ -61,11 +61,12 @@ def initialize(user=None):
     if user is not None:
         peft_model = get_latest_adaptation_path(user)
 
-        print(f"Loading factorization model {peft_model} for {user = }...")
+        if peft_model is not None:
+            print(f"Loading factorization model {peft_model} for {user = }...")
 
-        from peft import PeftModel
-        model = PeftModel.from_pretrained(model, peft_model)
-        model = model.merge_and_unload()
+            from peft import PeftModel
+            model = PeftModel.from_pretrained(model, peft_model)
+            model = model.merge_and_unload()
 
         initialize_output["peft_model"] = peft_model
 
@@ -267,9 +268,10 @@ def inference(input_language, output_language):
     if memory is not None:
         memory: list = json.loads(memory.read().decode("utf-8"))
         
-        memory_individual_words = True
-        if memory_individual_words:
-            memory = [word for it in memory for word in it.split()]
+        if memory is not None:
+            memory_individual_words = True
+            if memory_individual_words:
+                memory = [word for it in memory for word in it.split()]
         
     user = request.files.get("user") # can be None
     if user is not None:
