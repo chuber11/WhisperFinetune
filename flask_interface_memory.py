@@ -266,7 +266,11 @@ def inference(input_language, output_language):
     memory = request.files.get("memory") # can be None
     if memory is not None:
         memory: list = json.loads(memory.read().decode("utf-8"))
-
+        
+        memory_individual_words = True
+        if memory_individual_words:
+            memory = [word for it in memory for word in it.split()]
+        
     user = request.files.get("user") # can be None
     if user is not None:
         user: str = user.read().decode("utf-8")
