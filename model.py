@@ -76,7 +76,7 @@ class WhisperDecoderLayerMemory(WhisperDecoderLayer):
         if memory_text_enc is None:
             return None,None
 
-        mem_attn_out = mem_attn_out[:, :, :memory_text_enc.shape[1] + 1].argmax(-1).view(-1) - 1 # b*l_tar
+        mem_attn_out = mem_attn_out.argmax(-1).view(-1) - 1 # b*l_tar
 
         # filter -1´s
         mask = mem_attn_out.ne(-1)
