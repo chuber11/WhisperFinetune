@@ -50,6 +50,8 @@ if __name__ == "__main__":
         for memoryfile in glob(f"data_processed_{user}/*.{split}.memory"):
             for line in open(memoryfile):
                 for word in line.strip().split("|"):
+                    if not word:
+                        continue
                     c[word] += 1
         recognized_words[split] = c
 
@@ -58,7 +60,7 @@ if __name__ == "__main__":
         mp3 = id + "mp3"
         wav_bytes = convert_mp3_to_wav_bytes(mp3)
         memoryfile = id + "memory"
-        memory_words = [line.strip() for line in open(memoryfile)]
+        memory_words = [line.strip() for line in open(memoryfile) if line.strip()]
         print(f"{memory_words = }")
 
         outfiles = {}
