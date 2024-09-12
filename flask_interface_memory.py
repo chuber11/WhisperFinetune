@@ -272,6 +272,7 @@ def inference(input_language, output_language):
             memory_individual_words = True
             if memory_individual_words:
                 memory = [word for it in memory for word in it.split()]
+            memory = sorted(list(set(memory)))
         print(f"{memory = }")
         
     user = request.files.get("user") # can be None

@@ -473,11 +473,6 @@ class WhisperModelMemory(WhisperModel):
         for p in self.decoder.parameters():
             p.requires_grad = False
 
-        self.two_decoders = True
-
-        if not self.two_decoders:
-            print("WARNING: Should there be used two decoders?")
-
     def forward(
         self,
         input_features: Optional[torch.FloatTensor] = None,
@@ -537,34 +532,17 @@ class WhisperModelMemory(WhisperModel):
             else:
                 encoder_outputs_memory = encoder_outputs.encoder_outputs_memory
 
-        if self.two_decoders:
-            if past_key_values is None:
-                past_key_values_nomem = None
-            else:
-                past_key_values_nomem = past_key_values[:len(past_key_values)//2]
-                past_key_values = past_key_values[len(past_key_values)//2:]
-
-            # decoder outputs consists of (dec_features, past_key_value, dec_hidden, dec_attn)
-            decoder_outputs = self.decoder(
-                input_ids=decoder_input_ids,
-                attention_mask=decoder_attention_mask,
-                encoder_hidden_states=encoder_outputs[0],
-                head_mask=decoder_head_mask,
-                cross_attn_head_mask=cross_attn_head_mask,
-                past_key_values=past_key_values_nomem,
-                inputs_embeds=decoder_inputs_embeds,
-                #position_ids=decoder_position_ids,
-                use_cache=use_cache,
-                output_attentions=output_attentions,
-                output_hidden_states=output_hidden_states,
-                return_dict=return_dict,
-            )
+        if past_key_values is not None and memory[1] is not None:
+            past_key_values_mem = past_key_values[len(past_key_values)//2:]
+            past_key_values = past_key_values[:len(past_key_values)//2]
+        else:
+            past_key_values_mem = None
 
         # decoder outputs consists of (dec_features, past_key_value, dec_hidden, dec_attn)
-        decoder_outputs_memory = self.decoder_memory(
+        decoder_outputs = self.decoder(
             input_ids=decoder_input_ids,
             attention_mask=decoder_attention_mask,
-            encoder_hidden_states=encoder_outputs_memory[0],
+            encoder_hidden_states=encoder_outputs[0],
             head_mask=decoder_head_mask,
             cross_attn_head_mask=cross_attn_head_mask,
             past_key_values=past_key_values,
@@ -574,17 +552,35 @@ class WhisperModelMemory(WhisperModel):
             output_attentions=output_attentions,
             output_hidden_states=output_hidden_states,
             return_dict=return_dict,
-            memory=memory,
         )
 
-        if not self.two_decoders:
-            decoder_outputs = decoder_outputs_memory
-        else:
+        all_memory_cross_attentions = None
+
+        if memory[1] is not None: # non empty memory
+            # decoder outputs consists of (dec_features, past_key_value, dec_hidden, dec_attn)
+            decoder_outputs_memory = self.decoder_memory(
+                input_ids=decoder_input_ids,
+                attention_mask=decoder_attention_mask,
+                encoder_hidden_states=encoder_outputs_memory[0],
+                head_mask=decoder_head_mask,
+                cross_attn_head_mask=cross_attn_head_mask,
+                past_key_values=past_key_values_mem,
+                inputs_embeds=decoder_inputs_embeds,
+                #position_ids=decoder_position_ids,
+                use_cache=use_cache,
+                output_attentions=output_attentions,
+                output_hidden_states=output_hidden_states,
+                return_dict=return_dict,
+                memory=memory,
+            )
+
             #mask = torch.stack([c.argmax(-1).gt(0) for c in decoder_outputs_memory['all_memory_cross_attentions']]).any(0) # b x l_tgt
             mask = decoder_outputs_memory['all_memory_cross_attentions'][-1].argmax(-1).gt(0) # b x l_tgt
             decoder_outputs["last_hidden_state"][mask] = decoder_outputs_memory["last_hidden_state"][mask]
 
             decoder_outputs['past_key_values'] = decoder_outputs['past_key_values'] + decoder_outputs_memory['past_key_values']
+
+            all_memory_cross_attentions = decoder_outputs_memory.all_memory_cross_attentions
 
         if not return_dict:
             return decoder_outputs + encoder_outputs
@@ -598,7 +594,7 @@ class WhisperModelMemory(WhisperModel):
             encoder_last_hidden_state=encoder_outputs.last_hidden_state,
             encoder_hidden_states=encoder_outputs.hidden_states,
             encoder_attentions=encoder_outputs.attentions,
-            all_memory_cross_attentions=decoder_outputs_memory.all_memory_cross_attentions,
+            all_memory_cross_attentions=all_memory_cross_attentions,
         )
 
 @dataclass
