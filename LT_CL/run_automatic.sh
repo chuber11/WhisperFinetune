@@ -2,6 +2,8 @@
 #crontab -e
 #0 6 * * * bash /export/data2/chuber/2024/Whisper+Memory/LT_CL/run_automatic.sh >> /export/data2/chuber/2024/Whisper+Memory/LT_CL/log.txt 2>&1
 
+source ~/.bashrc
+
 executed=false
 for i in {1..72}
 do
@@ -15,6 +17,7 @@ do
             echo Using GPU: $GPU
             cd /export/data2/chuber/2024/Whisper+Memory/LT_CL
             bash run.sh $GPU alexander.waibel@kit.edu
+            #bash run.sh $GPU christian.huber@kit.edu
             executed=true
             break
         fi
