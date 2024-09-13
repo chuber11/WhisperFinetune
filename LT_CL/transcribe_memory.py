@@ -33,7 +33,9 @@ def convert_mp3_to_wav_bytes(mp3_file_path):
 if __name__ == "__main__":
     user = sys.argv[1]
     server = "http://192.168.0.60:4999/asr/infer/en+de,en+de"
+    server_baseline = "http://192.168.0.60:5008/asr/infer/en+de,en+de"
     num_train_before_dev = 9
+    individual_words = True
 
     while True:
         try:
@@ -55,12 +57,18 @@ if __name__ == "__main__":
                     c[word] += 1
         recognized_words[split] = c
 
-    for segfile in tqdm(glob(f"data_to_process_{user}/*.seg.aligned")):
+    for segfile in tqdm(sorted(glob(f"data_to_process_{user}/*.seg.aligned"))):
         id = segfile[:-len("seg.aligned")]
         mp3 = id + "mp3"
+
+        if not os.path.isfile(mp3):
+            continue
+
         wav_bytes = convert_mp3_to_wav_bytes(mp3)
         memoryfile = id + "memory"
         memory_words = [line.strip() for line in open(memoryfile) if line.strip()]
+        if individual_words:
+            memory_words = list(set(word for phrase in memory_words for word in phrase.split() if word.strip()))
         print(f"{memory_words = }")
 
         outfiles = {}
@@ -80,7 +88,10 @@ if __name__ == "__main__":
             print(res.text)
             hypo = res.json()["hypo"]
 
-            if any(word in hypo for word in memory_words) or any(word in hypo for c in recognized_words.values() for word in c):
+            res = requests.post(server_baseline, files={"pcm_s16le":wav_, "prefix":"", "num_beams": 4})
+            hypo_baseline = res.json()["hypo"]
+
+            if any(word in hypo and word not in hypo_baseline for word in memory_words) or any(word in hypo and word not in hypo_baseline for c in recognized_words.values() for word in c):
                 all_s.append(line)
                 all_h.append(hypo+"\n")
                 words = set()
