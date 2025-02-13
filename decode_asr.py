@@ -53,6 +53,7 @@ else:
 
 tokenizer = WhisperTokenizerFast.from_pretrained(args.model_name)
 tokenizer.set_prefix_tokens(language=args.language, task="transcribe")
+tokenizer.pad_token = tokenizer.eos_token
 
 processor = WhisperProcessor.from_pretrained(args.model_name)
 
@@ -68,8 +69,8 @@ else:
 
         def list_to_tensor(memory_words):
             memory = processor.tokenizer(memory_words, return_tensors="pt", padding=True)
-            memory["input_ids"] = memory["input_ids"][:,4:].cuda()
-            memory["attention_mask"] = memory["attention_mask"][:,4:].cuda()
+            memory["input_ids"] = memory["input_ids"][:,2:].cuda()
+            memory["attention_mask"] = memory["attention_mask"][:,2:].cuda()
             return memory
 
         prefix = " "
@@ -101,13 +102,6 @@ if args.load_adapter_model is not None:
 if args.load_adapter_model is not None:
     model = PeftModel.from_pretrained(model, args.load_adapter_model)
     model = model.merge_and_unload()
-
-tokenizer = WhisperTokenizerFast.from_pretrained(args.model_name)
-tokenizer.set_prefix_tokens(language=args.language, task="transcribe")
-
-processor = WhisperProcessor.from_pretrained(args.model_name)
-
-data_collator = DataCollatorSpeechSeq2SeqWithPadding(processor=processor, tokenizer=tokenizer, return_ids=True)
 
 batch_size = args.batch_size
 

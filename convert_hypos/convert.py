@@ -10,6 +10,7 @@ import re
 import getpass
 import jiwer
 from load_save import load_dict, save_dict
+from tqdm import tqdm
 
 def response2output(response):
     output = json.loads(response)["choices"][0]["message"]["content"]
@@ -87,7 +88,8 @@ def run_llm(utterance, model="gpt-4-turbo-preview", max_tokens=512, number=0):
             #client = OpenAI(api_key=getpass.getpass("Enter your api_key: "))
             client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
-        print("Doing request", prompt, utterance)
+        #print("Doing request", prompt, utterance)
+        print("Doing request") #, prompt, utterance)
 
         if type(prompt) is str:
             response = client.chat.completions.create(
@@ -131,7 +133,7 @@ def run_llm(utterance, model="gpt-4-turbo-preview", max_tokens=512, number=0):
     if len(res) > 1:
         print("WARNING: Result contains multiple lines! Using input as output")
         output = utterance
-        return output
+        return output, json.loads(response)["usage"]
     output = res[0]
 
     wer = jiwer.wer(output, utterance)
@@ -152,11 +154,13 @@ if __name__ == "__main__":
     #model = "gpt-3.5-turbo"
     #model = "gpt-4-turbo-preview"
     model = "gpt-4o"
+    #model = "manual"
 
     allfiles = [#"../hypos/hypo_openai_whisper-large-v2_beam4.*.txt",
-        "../hypos/hypo_openai_whisper-large-v2_beam4.*.human.txt",
-        "../hypos/hypo_openai_whisper-large-v2_beam4.*.human_train.txt",
-        "../hypos/hypo_openai_whisper-large-v2_cv_filtered_beam4.*.txt",
+        #"../hypos/hypo_openai_whisper-large-v2_beam4.*.human.txt",
+        #"../hypos/hypo_openai_whisper-large-v2_beam4.*.human_train.txt",
+        #"../hypos/hypo_openai_whisper-large-v2_cv_filtered_beam4.*.txt",
+        "../hypos/hypo_openai_whisper-large-v2_beam4.numbers_youtube.txt",
         ]
 
     for files in allfiles:
@@ -166,7 +170,7 @@ if __name__ == "__main__":
             lines = open(file).readlines()
             #random.shuffle(lines)
 
-            for i,line in enumerate(lines):
+            for i,line in enumerate(tqdm(lines)):
                 #print(i)
 
                 line = line.strip().split()

@@ -1,7 +1,9 @@
 
-model_name="${2:-impairedFull}"
+version=4
+model_name=5_new${version}_v3
 
 clear
+set -e
 
 #export CUDA_VISIBLE_DEVICES=1
 
@@ -20,13 +22,17 @@ if [ -e "$logfile" ] && [ "$1" != "-y" ]; then
 fi
 
 python -u train.py --model_path ./saves/model_$model_name \
-    --segfiles "data_impairedSpeech_new/impairedSpeech.DE.train.seg.aligned" \
-    --segfiles_dev "data_impairedSpeech_new/impairedSpeech.DE.dev.seg.aligned" \
+    --segfiles "data_impairedSpeech_new$version/impairedSpeech.DE.train.seg.aligned" "data_impairedSpeech_new$version/corrections.seg.aligned" \
+    --dataset_factors 1 4 \
+    --segfiles_dev "data_impairedSpeech_new$version/impairedSpeech.DE.dev.seg.aligned" \
     --warmup_steps 100 --learning_rate 1e-5 \
-    --log_steps 10 --model_name openai/whisper-large-v3 \
-    --eval_steps 10 \
+    --log_steps 10 --model_name data_impairedSpeech \
+    --eval_steps 10 --use_early_stopping 20 \
     `#--gradient_checkpointing` \
     `#--factorization_rank 16` `#--factorization_only_decoder` \
-    --batch_size 4 --gradient_accumulation_steps 8 \
-    | tee $logfile
+    --batch_size 4 --gradient_accumulation_steps 64 \
+    | tee -a $logfile
+
+cp data_impairedSpeech/*.json saves/model_$model_name/checkpoint-*
+ct2-transformers-converter --model saves/model_$model_name/checkpoint-* --output_dir saves/model_$model_name/ct2 --copy_files tokenizer.json preprocessor_config.json
 

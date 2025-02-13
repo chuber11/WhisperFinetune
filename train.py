@@ -210,6 +210,7 @@ else:
 tokenizer = WhisperTokenizerFast.from_pretrained(args.model_name)
 #tokenizer.set_prefix_tokens(language="german", task="transcribe")
 tokenizer.set_prefix_tokens(task="transcribe")
+tokenizer.pad_token = tokenizer.eos_token
 processor = WhisperProcessor.from_pretrained(args.model_name)
 
 data_collator = DataCollatorSpeechSeq2SeqWithPadding(processor=processor, tokenizer=tokenizer)

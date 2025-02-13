@@ -46,12 +46,8 @@ def initialize(user=None):
 
     processor.get_decoder_prompt_ids(language="en", task="transcribe") # WARNING: Changes state of processor
     
-    #model_path = "saves/model_newwords6/checkpoint-50000"
-    #model_path = "saves/model_newwords7/checkpoint-158000"
-    #model_path = "saves/model_newwords8/checkpoint-199000"
-    #model_path = "saves/model_newwords10_2/checkpoint-175000"
-    #model_path = "saves/model_newwords11_3/checkpoint-186000"
-    model_path = "saves/model_newwords13/checkpoint-114000"
+    model_path = "saves/model_newwords15/checkpoint-184000"
+    #model_path = "saves/model_newwords15_2/checkpoint-5000"
 
     model = WhisperForConditionalGenerationMemory.from_pretrained(model_path)
     #model = WhisperForConditionalGeneration.from_pretrained(model_path)
@@ -74,12 +70,7 @@ def initialize(user=None):
     model.generation_config.begin_suppress_tokens.remove(50257)
     model.generation_config.lang_to_id = {i:i for i in range(50259,50358)}
     
-    """model_path = "saves/model_numbers_batchweighting0_fact0_freeze0_real_dev_data0_lr1.0003e-6_train_emb0/checkpoint-900"
-    model2 = WhisperForConditionalGeneration.from_pretrained(model_path)
-    model.load_state_dict(model2.state_dict(),strict=False)
-    del model2"""
-
-    max_batch_size = 4
+    max_batch_size = 1
 
     if torch.cuda.is_available():
         model = model.cuda()
@@ -115,8 +106,8 @@ def infer_batch(audio_wavs, prefix="", input_language="en", task="transcribe", a
     memory_prefix = " "
 
     if memory_words is not None and len(memory_words) > 0:
-        #print(memory_words)
         memory_words = [memory_prefix+w for w in memory_words]
+        #print(memory_words)
 
         memory = processor.tokenizer(memory_words, return_tensors="pt", padding=True)
         memory["input_ids"] = memory["input_ids"][:,4:].to(device)

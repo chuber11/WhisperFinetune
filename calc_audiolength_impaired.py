@@ -9,4 +9,6 @@ def calc(segfile):
     print(f"Segfile: {segfile}, Hours: {s/60/60:.1f}")
 
 for segfile in glob("data_impairedSpeech*/*.seg.aligned"):
+    if "correction" in segfile:
+        continue
     calc(segfile)

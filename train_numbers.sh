@@ -53,6 +53,7 @@ fi
 
 python -u train.py \
     `#--load saves/model_numbers1_lr1e-4_df10` \
+    --model_name saves/model_numbers_batchweighting0_fact0_freeze0_real_dev_data0_lr1e-5_train_emb0/checkpoint-350 \
     --model_path ./saves/model_$model_name \
     --warmup_steps 100 --learning_rate $lr \
     --log_steps 25 \
