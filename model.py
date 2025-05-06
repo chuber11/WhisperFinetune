@@ -694,7 +694,7 @@ class WhisperForConditionalGenerationMemoryWrapper(WhisperForConditionalGenerati
 
         #print(f"{decoder_input_ids = }")
 
-        if encoder_outputs and "memory" in encoder_outputs: # Replace word by memory entry
+        if encoder_outputs and "memory" in encoder_outputs and len(encoder_outputs["memory"]) >= 5: # Replace word by memory entry
             memory_ = encoder_outputs["memory"]
             memory_text_ids = encoder_outputs["memory"][4]
             if type(encoder_outputs["memory"]) is list and len(encoder_outputs["memory"]) >= 5 and memory_text_ids is not None:
@@ -838,7 +838,7 @@ class WhisperForConditionalGenerationMemoryWrapper(WhisperForConditionalGenerati
             for name, module in encoder.named_modules():
                 if isinstance(module, (BaseTunerLayer, ModulesToSaveWrapper)):
                     module.enable_adapters(enabled=True)
-        add_score = model_kwargs["memory"].get("add_score", 0) if "memory" in model_kwargs else 0
+        add_score = model_kwargs["memory"].get("add_score", 0) if "memory" in model_kwargs and model_kwargs["memory"] else 0
         memory = model_kwargs["memory"] if "memory" in model_kwargs else None
         memory = self.model.encoder_memory(memory)
         #print("2) Encoded memory of size", len(memory[0])-1)
