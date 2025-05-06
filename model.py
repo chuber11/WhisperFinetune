@@ -158,7 +158,7 @@ class WhisperDecoderLayerMemory(WhisperDecoderLayer):
         residual = hidden_states
         hidden_states = self.memory_layer_norm(hidden_states)
 
-        encoder_output_memory, memory_text_enc, memory_text_embeds, memory_text_mask = memory
+        encoder_output_memory, memory_text_enc, memory_text_embeds, memory_text_mask, _ = memory
 
         memory_attn_weights = self.memory_attn(hidden_states, encoder_output_memory) # b x l_tgt x (n_mem+1)
         #if memory_attn_weights.argmax(-1).gt(0).any():
@@ -436,9 +436,18 @@ class EncoderMemory(nn.Module):
 
         encoder_output_memory_wonef = 3 * memory_text_enc.sum(1) / lengths # n_mem x d_model
 
+        if memory["double"]:
+            encoder_output_memory_wonef = encoder_output_memory_wonef[:encoder_output_memory_wonef.shape[0]//2]
+            memory_text_enc = memory_text_enc[:memory_text_enc.shape[0]//2]
+            memory_text_embeds = memory_text_embeds[:memory_text_embeds.shape[0]//2]
+            memory_text_mask = memory_text_mask[:memory_text_mask.shape[0]//2]
+            memory_text_ids = memory["input_ids"][memory["input_ids"].shape[0]//2:]
+        else:
+            memory_text_ids = None
+
         encoder_output_memory = torch.cat([self.no_entry_found, encoder_output_memory_wonef],0) # (n_mem+1) x d_model
 
-        res = [encoder_output_memory, memory_text_enc, memory_text_embeds, memory_text_mask]
+        res = [encoder_output_memory, memory_text_enc, memory_text_embeds, memory_text_mask, memory_text_ids]
         
         if not self.training:
             self.last_memory = memory
@@ -454,6 +463,7 @@ class Seq2SeqModelOutputMemory(Seq2SeqModelOutput):
 class BaseModelOutputMemory(BaseModelOutput):
     memory: Optional[Tuple[torch.FloatTensor, ...]] = None
     encoder_outputs_memory: Optional[Tuple[torch.FloatTensor, ...]] = None
+    add_score: Optional[int] = None
 
 class WhisperModelMemory(WhisperModel):
     def __init__(self, config: WhisperConfig):
@@ -680,7 +690,63 @@ class WhisperForConditionalGenerationMemoryWrapper(WhisperForConditionalGenerati
             return_dict=return_dict,
             memory=memory,
         )
-        lm_logits = self.proj_out(outputs[0])
+        lm_logits = self.proj_out(outputs[0]) # b x l_tgt x n_vocab
+
+        #print(f"{decoder_input_ids = }")
+
+        if encoder_outputs and "memory" in encoder_outputs: # Replace word by memory entry
+            memory_ = encoder_outputs["memory"]
+            memory_text_ids = encoder_outputs["memory"][4]
+            if type(encoder_outputs["memory"]) is list and len(encoder_outputs["memory"]) >= 5 and memory_text_ids is not None:
+                if past_key_values is None: # create indices
+                    indices = torch.full((lm_logits.shape[0],2), -1,
+                                         device=lm_logits.device)
+                else: # read last indices
+                    indices = past_key_values[-1][0]
+
+                mask = outputs['all_memory_cross_attentions'][-1][:,-1].argmax(-1) # b
+                mask2 = mask.gt(0)
+                if mask2.any():
+                    mask_ = mask2 & indices[:,0].eq(-1)
+
+                    #print(f"{mask  = }")
+                    #print(f"{mask_ = }")
+                    #print(f"before {indices = }")
+
+                    indices[:,0][mask_] = mask[mask_]-1
+                    indices[:,1][mask_] = 0
+
+                mask = indices[:,0].ne(-1)
+                if mask.any():
+                    # use indices
+                    index1 = indices[:,0][mask]
+                    tokens = memory_text_ids[index1]
+                    index2 = indices[:,1][mask]
+                    tokens2 = tokens.gather(1,index2.unsqueeze(-1)) # sum(mask) x 1
+                    lm_logits_ = lm_logits[mask]
+                    boost_all = False
+                    eos_token = 50257
+                    if not boost_all:
+                        lm_logits_[:,0].scatter_add_(1,tokens2,torch.full_like(tokens2, encoder_outputs.add_score if encoder_outputs.add_score else 0, dtype=lm_logits.dtype))
+                    else:
+                        add = torch.full_like(tokens, encoder_outputs.add_score if encoder_outputs.add_score else 0, dtype=lm_logits.dtype)
+                        add[tokens.eq(eos_token)] = 0
+                        lm_logits_[:,0].scatter_add_(1,tokens,add)
+                    lm_logits[mask] = lm_logits_
+
+                    tokens2 = tokens.gather(1,(index2+1).unsqueeze(-1)) # sum(mask) x 1
+                    mask2 = tokens2.eq(eos_token)
+                    if mask2.any():
+                        indices_ = indices[:,0][mask]
+                        indices_[mask2[:,0]] = -1
+                        indices[:,0][mask] = indices_
+
+                indices[:,1][indices[:,1].gt(-1)] += 1
+
+                if mask.any():
+                    pass #print(f"after  {indices = }")
+
+                outputs['past_key_values'] = tuple([*outputs['past_key_values'], (indices,)])
 
         loss = None
         if labels is not None:
@@ -772,10 +838,11 @@ class WhisperForConditionalGenerationMemoryWrapper(WhisperForConditionalGenerati
             for name, module in encoder.named_modules():
                 if isinstance(module, (BaseTunerLayer, ModulesToSaveWrapper)):
                     module.enable_adapters(enabled=True)
+        add_score = model_kwargs["memory"].get("add_score", 0) if "memory" in model_kwargs else 0
         memory = model_kwargs["memory"] if "memory" in model_kwargs else None
         memory = self.model.encoder_memory(memory)
         #print("2) Encoded memory of size", len(memory[0])-1)
-        model_kwargs["encoder_outputs"] = BaseModelOutputMemory(*model_kwargs["encoder_outputs"].values(),memory=memory, encoder_outputs_memory=encoder_outputs_memory)
+        model_kwargs["encoder_outputs"] = BaseModelOutputMemory(*model_kwargs["encoder_outputs"].values(),memory=memory, encoder_outputs_memory=encoder_outputs_memory, add_score=add_score)
         #print(model_kwargs["encoder_outputs"])
         return model_kwargs
         

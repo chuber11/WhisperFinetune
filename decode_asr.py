@@ -33,6 +33,7 @@ parser.add_argument('--load_adapter_model', type=str, help='Load adapter weights
 parser.add_argument('--batch_size', type=int, default=4)
 parser.add_argument('--no_write_at_end', action="store_true")
 parser.add_argument('--language', type=str, default="english")
+parser.add_argument('--force_exact_memory', type=int, default=0)
 
 args = parser.parse_args()
 
@@ -66,23 +67,38 @@ else:
     model_class = WhisperForConditionalGenerationMemory
 
     if args.memory_file is not None and args.memory_file != "None":
+        prefix = " "
 
         def list_to_tensor(memory_words):
+            double = True
+            if not double:
+                memory_words = [prefix+w for w in memory_words]
+            else:
+                memory_words2 = []
+                for w in memory_words:
+                    w = w.split("->")[0]
+                    memory_words2.append(prefix+w)
+                for w in memory_words:
+                    w = w.split("->")[-1]
+                    memory_words2.append(prefix+w)
+                memory_words = memory_words2
+            print(memory_words)
             memory = processor.tokenizer(memory_words, return_tensors="pt", padding=True)
-            memory["input_ids"] = memory["input_ids"][:,2:].cuda()
-            memory["attention_mask"] = memory["attention_mask"][:,2:].cuda()
+            memory["input_ids"] = memory["input_ids"][:,4:].cuda()
+            memory["attention_mask"] = memory["attention_mask"][:,4:].cuda()
+            memory["double"] = double
+            memory["add_score"] = args.force_exact_memory
             return memory
 
-        prefix = " "
         if not "data_filtered_test" in args.memory_file:
-            memory_words = [prefix+line.strip() for line in open(args.memory_file)]
+            memory_words = [line.strip() for line in open(args.memory_file)]
             memory = list_to_tensor(memory_words)
             print("MEMORY",memory_words)
         else: # for B-WER testing
             f1 = open(args.memory_file.replace("all",""))
             f2 = open(args.memory_file.replace("allwords","seg.aligned"))
             new_words = [(line2.strip().split()[0],line.strip().split("|")) for line,line2 in zip(f1,f2)]
-            memory = lambda ids: [prefix+w for i,l in new_words for w in l if i in ids]
+            memory = lambda ids: [w for i,l in new_words for w in l if i in ids]
             print("MEMORY Function")
     else:
         memory = None
@@ -128,7 +144,7 @@ for i in tqdm(range(0,len(dataset),batch_size)):
                         if num >= args.memory_num_distractors:
                             break
                         if prefix+word not in memory_words:
-                            memory_words.append(prefix+word)
+                            memory_words.append(word)
                             num += 1
                     if num >= args.memory_num_distractors:
                         break

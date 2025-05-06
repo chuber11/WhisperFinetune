@@ -38,10 +38,12 @@ def initialize(user=None):
         model = initialize_output.pop("model")
         del model
 
-    filename = "large-v2" # ["tiny.en","tiny","base.en","base","small.en","small","medium.en","medium","large-v1","large-v2","large"]
+    #filename = "large-v2" # ["tiny.en","tiny","base.en","base","small.en","small","medium.en","medium","large-v1","large-v2","large"]
+    filename = "saves/model_newwords15/checkpoint-184000"
     #filename = "tiny"
     
-    model_path = "openai/whisper-{}".format(filename)
+    #model_path = "openai/whisper-{}".format(filename)
+    model_path = filename
     processor = WhisperProcessor.from_pretrained(model_path)
 
     processor.get_decoder_prompt_ids(language="en", task="transcribe") # WARNING: Changes state of processor
@@ -106,14 +108,26 @@ def infer_batch(audio_wavs, prefix="", input_language="en", task="transcribe", a
     memory_prefix = " "
 
     if memory_words is not None and len(memory_words) > 0:
-        memory_words = [memory_prefix+w for w in memory_words]
-        #print(memory_words)
-
+        double = True #any("->" in w for w in memory_words)
+        if not double:
+            memory_words = [memory_prefix+w for w in memory_words]
+        else:
+            memory_words2 = []
+            for w in memory_words:
+                w = w.split("->")[0]
+                memory_words2.append(memory_prefix+w)
+            for w in memory_words:
+                w = w.split("->")[-1]
+                memory_words2.append(memory_prefix+w)
+            memory_words = memory_words2
         memory = processor.tokenizer(memory_words, return_tensors="pt", padding=True)
         memory["input_ids"] = memory["input_ids"][:,4:].to(device)
         memory["attention_mask"] = memory["attention_mask"][:,4:].to(device)
+        memory["double"] = double
+        memory["add_score"] = 25
         #print([[processor.tokenizer.decode(i) for i in memory["input_ids"][j]] for j in range(len(memory["input_ids"]))])
         #print(memory["attention_mask"])
+        print(memory_words)
     else:
         memory = None
 
