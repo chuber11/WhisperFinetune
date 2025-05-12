@@ -698,6 +698,8 @@ class WhisperForConditionalGenerationMemoryWrapper(WhisperForConditionalGenerati
             memory_ = encoder_outputs["memory"]
             memory_text_ids = encoder_outputs["memory"][4]
             if type(encoder_outputs["memory"]) is list and len(encoder_outputs["memory"]) >= 5 and memory_text_ids is not None:
+                lm_logits = lm_logits - lm_logits.mean(2,keepdim=True)
+
                 if past_key_values is None: # create indices
                     indices = torch.full((lm_logits.shape[0],2), -1,
                                          device=lm_logits.device)
