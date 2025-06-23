@@ -132,6 +132,9 @@ for i in tqdm(range(0,len(dataset),batch_size)):
     data = data_collator([dataset[j] for j in range(i,min(len(dataset),i+batch_size))],inference=False)
     ids = data.pop("ids")
 
+    #if not "4367318_3" in ids:
+    #    continue
+
     with torch.no_grad():
         if not callable(memory):
             memory_ = memory
@@ -150,10 +153,22 @@ for i in tqdm(range(0,len(dataset),batch_size)):
                         break
             memory_ = list_to_tensor(memory_words)
 
-        input_features = data["input_features"].cuda()
-        model.generation_config.suppress_tokens = [t for t in model.generation_config.suppress_tokens if t!=25] # allow for : to be decoded
-        transcript = model.generate(input_features, forced_decoder_ids=forced_decoder_ids, no_repeat_ngram_size=6, num_beams=args.num_beams, memory=memory_)
-    transcript = tokenizer.batch_decode(transcript, skip_special_tokens=True)
+        text_convert = False
+
+        if not text_convert:
+            input_features = data["input_features"].cuda()
+            model.generation_config.suppress_tokens = [t for t in model.generation_config.suppress_tokens if t!=25] # allow for : to be decoded
+            transcript = model.generate(input_features, forced_decoder_ids=forced_decoder_ids, no_repeat_ngram_size=6, num_beams=args.num_beams, memory=memory_)
+            transcript = tokenizer.batch_decode(transcript, skip_special_tokens=True)
+        else:
+            given_hypofile = f"hypos_memory/saves_model_newwords15_checkpoint-184000.EN.data_filtered_test_earnings_memory.EN.test.allwords.{args.memory_num_distractors}.0.hyp"
+            given_hypos = {words[0]:" ".join(words[1:]) for line in open(given_hypofile) if (words := line.strip().split())}
+            transcript = [given_hypos[i] for i in ids]
+            for word in memory_words:
+                if not "->" in word:
+                    continue
+                w1, w2 = word.split("->")
+                transcript = [t.replace(w1,w2) for t in transcript]
 
     for t,id in zip(transcript, ids):
         print(id,t)

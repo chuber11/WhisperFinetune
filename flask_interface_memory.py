@@ -144,6 +144,8 @@ def infer_batch(audio_wavs, prefix="", input_language="en", task="transcribe", a
     text_output_raw = processor.batch_decode(predicted_ids, skip_special_tokens=True)
     lids = [l[2:-2] for l in processor.batch_decode(predicted_ids[:,1])]
 
+    #print([[processor.tokenizer.decode(i) for i in predicted_ids[j][1:]] for j in range(len(predicted_ids))])
+
     if input_language != "None":
         input_languages = input_language.split("+")
         text_output_raw = [t if l in input_languages else prefix for t,l in zip(text_output_raw,lids)]

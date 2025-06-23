@@ -1,10 +1,11 @@
 __pycache__/*
+*/__pycache__/*
 *.swp
 data/*
 hypos/*
 logs/*
 saves/*
-*.pt
+*.pt*
 README.txt
 CL/*
 NumbersTrainingset
