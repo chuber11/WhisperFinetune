@@ -29,7 +29,7 @@ python -u train.py --model_path ./saves/model_$model_name \
     --segfiles_dev "../WhisperE+Phi2/data/cv.EN.dev.seg.aligned" "data/voxpopuli.EN.validation.seg.aligned" `#"/project/OML/chuber/2023/data/earnings_nw_dataset/aligned_21/nw.dev.test.seg.aligned" "LT_CL/data_processed_$user/*.dev.seg.aligned"` \
     --warmup_steps 0 --learning_rate 1e-5 \
     --log_steps 10 \
-    --eval_steps 1000 \
+    --eval_steps 100 \
     `#--gradient_checkpointing` \
     --factorization_rank 4 --factorization_only_decoder \
     --batch_size 8 --gradient_accumulation_steps 4 \
