@@ -91,7 +91,7 @@ class MyDataset(Dataset):
 
         if len(all_segfiles) == 0:
             print(segfiles)
-            raise FileNotFoundError
+            input("Dataset does not contain segfiles. Press enter to ignore: ")
 
         random.seed(42)
 

@@ -12,30 +12,28 @@ def replace_except_specified_chars(text):
     result = re.sub(r'\s+', ' ', re.sub(pattern, ' ', text))
     return result
 
-# usage: python generate_pseudolabels.py $talk $i $datadir $experimentdir
+# usage: python generate_pseudolabels.py $talk $i $datadir $experimentname $memoryfilesname
 
 talk = sys.argv[1]
 i = int(sys.argv[2])
 datadir = sys.argv[3]
-experimentdir = sys.argv[4]
+experimentname = sys.argv[4]
+memoryfilesname = sys.argv[5]
 
 # Load new_words that have been written in the memory until now to later extract pseudolabels containing them
 new_words = set()
-for j,talk_ in enumerate(open(datadir+"/order.txt")):
+for j,talk_ in enumerate(open(f"{datadir}/memory_files/order_{memoryfilesname}.txt")):
     if j>i:
         break
 
-    talk_ = json.loads(talk_.strip())
-    id = talk_[0][len("audio/"):-len(".info.json")]
-
-    for line in open(datadir+"/memory_files/"+id+".memory"):
+    for line in open(f"{datadir}/memory_files/{memoryfilesname}/{talk_}.memory"):
         new_words.add(line.strip())
 
 # Count the number new words already occured to later split between train and dev sets
 counters = {"train":Counter(), "dev":Counter()}
 for split in ["train","dev"]:
     counter = counters[split]
-    for file in glob(f"{experimentdir}/data/*.{split}.new_words"):
+    for file in glob(f"CL/{experimentname}/data/*.{split}.new_words"):
         for line in open(file):
             new_words = line.strip().split("|")
             for w in new_words:
@@ -45,19 +43,20 @@ for split in ["train","dev"]:
 outfiles = {}
 for split in ["train","dev"]:
     for type in ["seg.aligned","ref","new_words"]:
-        outfiles[(split,type)] = open(f"{experimentdir}/data/{talk}.{split}.{type}","w")
+        outfiles[(split,type)] = open(f"CL/{experimentname}/data/{talk}.{split}.{type}","w")
 
 # Write out new pseudolabels
-for line,line2 in zip(open(f"{datadir}/segfiles/{talk}.seg.aligned"),open(f"{experimentdir}/hypos/{talk}.hyp")):
+for line,line2,line3 in zip(open(f"{datadir}/segfiles/{talk}.seg.aligned"),open(f"CL/{experimentname}/hypos/{talk}.hyp"),open(f"{datadir}/segfiles/{talk}.hypo")):
     seg = line.strip().split()
     hypo = line2.strip().split()
+    hypo_baseline = line3.strip().split()
     id, hypo = hypo[0], " ".join(hypo[1:])
 
     if seg[0] != id:
         print("ERROR: segfile and hypofile not aligned!")
         continue
 
-    found_new_words = [new_word for new_word in new_words if new_word in replace_except_specified_chars(hypo).split()]
+    found_new_words = [new_word for new_word in new_words if new_word in replace_except_specified_chars(hypo).split() and new_word not in replace_except_specified_chars(hypo_baseline).split()]
     if not found_new_words:
         continue
 
@@ -71,4 +70,6 @@ for line,line2 in zip(open(f"{datadir}/segfiles/{talk}.seg.aligned"),open(f"{exp
 
     for w in found_new_words:
         counters[split][w] += 1
+
+print(sum(counters["train"].values()))
 
