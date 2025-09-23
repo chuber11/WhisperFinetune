@@ -8,7 +8,7 @@ from torch.utils.data import Dataset
 from glob import glob
 
 from dataclasses import dataclass
-from transformers import Wav2Vec2Processor
+from transformers import Wav2Vec2Processor, WhisperTokenizerFast, WhisperProcessor
 from typing import Any, Dict, List, Union, Optional
 
 import math
@@ -17,6 +17,8 @@ import random
 import re
 import os
 from tqdm import tqdm
+
+from torch.utils.data import DataLoader
 
 def replace_except_specified_chars(text):
     # This pattern matches any character that is NOT a-z, A-Z, äöüÄÖÜß
@@ -437,4 +439,27 @@ class DataCollatorMTSeq2SeqWithPadding:
             batch["ids"] = ids
 
         return batch
+
+if __name__ == "__main__":
+    segfiles = ["../WhisperE+Phi2/data/cv.EN.train.seg.aligned","data/voxpopuli.EN.train.seg.aligned","/project/OML/chuber/2023/data/earnings_nw_dataset/aligned_21/nw.dev.train.*.seg.aligned"]
+
+    dataset = ConcatDataset([MyDataset(segfile) for segfile in segfiles])
+
+    model_name = "openai/whisper-large-v2"
+
+    tokenizer = WhisperTokenizerFast.from_pretrained(model_name)
+    #tokenizer.set_prefix_tokens(language="german", task="transcribe")
+    tokenizer.set_prefix_tokens(task="transcribe")
+    tokenizer.pad_token = tokenizer.eos_token
+    processor = WhisperProcessor.from_pretrained(model_name)
+
+    data_collator = DataCollatorSpeechSeq2SeqWithPadding(processor=processor, tokenizer=tokenizer)
+    dataloader = DataLoader(dataset, collate_fn=data_collator, batch_size=32)
+
+    s = 0
+    n = 0
+    for batch in dataloader:
+        s += batch["labels"].ne(-100).sum()
+        n += 1
+        print(s/n)
 
