@@ -234,6 +234,31 @@ class DataCollatorSpeechSeq2SeqWithPadding:
 
         has_memory = "memory_words" in features[0]
 
+        if has_memory:
+            memory_length_max = 200
+            avg_words_per_utterance = 3
+
+            info = [(index2, feature, word) for index2, feature in enumerate(features) for word in feature["memory_words"]]
+            info = random.sample(info, avg_words_per_utterance*len(features))
+
+            memory_words = [" "+word for index2, feature, word in info]+[" "+word for feature in features for word in feature["memory_word_dummys"]]
+            memory_words = memory_words[:memory_length_max]
+            for feature in features:
+                labels = feature["labels"]
+                for i,memory_word in enumerate(memory_words):
+                    if memory_word not in labels:
+                        continue
+                    labels = labels.replace(memory_word,f"<|memory_{i}|>")
+                feature["labels"] = labels
+
+            memory = self.tokenizer(memory_words, return_tensors="pt", padding=True)
+            memory["input_ids"] = memory["input_ids"][:,3:]
+            memory["attention_mask"] = memory["attention_mask"][:,3:]
+            
+            batch["memory"] = memory
+        
+        batch["first_memory_id"] = self.tokenizer("<|memory_0|>")["input_ids"][-2]
+
         if features[0]["labels"] is not None:
             text_labels = self.tokenizer([feature["labels"] for feature in features], return_tensors="pt", padding=True)
 
@@ -254,83 +279,6 @@ class DataCollatorSpeechSeq2SeqWithPadding:
 
         if self.return_ids:
             batch["ids"] = [item["id"] for item in features]
-
-        if has_memory:
-            memory_length_max = 100
-            avg_words_per_utterance = 3
-
-            info = [(index2, feature, word) for index2, feature in enumerate(features) for word in feature["memory_words"]]
-            info = random.sample(info, avg_words_per_utterance*len(features))
-
-            memory_words = [" "+word for index2, feature, word in info]+[" "+word for feature in features for word in feature["memory_word_dummys"]]
-            memory_words = memory_words[:memory_length_max]
-
-            memory = self.tokenizer(memory_words, return_tensors="pt", padding=True)
-            memory["input_ids"] = memory["input_ids"][:,3:]
-            memory["attention_mask"] = memory["attention_mask"][:,3:]
-            
-            memory_labels = torch.zeros_like(labels)
-            memory_labels[labels.eq(-100)] = -100
-            index = 0
-            for index2, feature, word in info:
-                ids = labels[index2][3:]
-                mask = ids.ne(-100)
-                ids = ids[mask][:-1]
-
-                tokens = [self.tokenizer.decode(i) for i in ids]
-                label = feature["labels"][len("<|en|>"):]
-
-                for start in range(len(tokens)):
-                    label = label[len(tokens[start]):]
-                    if not word in label:
-                        label = tokens[start]+label
-                        break
-                for end in range(len(tokens)-1,-1,-1):
-                    label = label[:-len(tokens[end])]
-                    if not word in label:
-                        label = label+tokens[end]
-                        break
-
-                if word not in self.tokenizer.decode(labels[index2,start+3:end+4]):
-                    print("WARNING: Memory entry might be corrupted")
-
-                index += 1
-                memory_labels[index2,start+3:end+4] = index
-
-            #print(memory_labels.eq(0).sum(),memory_labels.ne(0).sum())
-
-            good = 0
-            anz = 0
-            for i in range(len(labels)):
-                for j in range(1,len(labels[i])):
-                    if memory_labels[i][j] != 0 and memory_labels[i][j-1]!=memory_labels[i][j]:
-                        anz += 1
-                        use = True
-                        for k in range(j,len(labels[i])):
-                            if memory_labels[i][k] != memory_labels[i][j]:
-                                break
-                            if memory_labels[i][j] == -100:
-                                break
-                            mem = memory["input_ids"][memory_labels[i][j]-1]
-                            if labels[i][k] != mem[k-j]:
-                                use = False
-                                break
-                                #print(labels[i],k)
-                                #print(memory_labels[i])
-                                #print(mem,k-j) 
-                                #breakpoint()
-                        if use:
-                            good += 1
-                        else:
-                            for k in range(j,len(labels[i])):
-                                if memory_labels[i][k] != memory_labels[i][j]:
-                                    break
-                                if memory_labels[i][j] == -100:
-                                    break
-                                memory_labels[i][k] = -100
-
-            batch["memory"] = memory
-            batch["memory_labels"] = memory_labels
 
         return batch
 
@@ -441,9 +389,9 @@ class DataCollatorMTSeq2SeqWithPadding:
         return batch
 
 if __name__ == "__main__":
-    segfiles = ["../WhisperE+Phi2/data/cv.EN.train.seg.aligned","data/voxpopuli.EN.train.seg.aligned","/project/OML/chuber/2023/data/earnings_nw_dataset/aligned_21/nw.dev.train.*.seg.aligned"]
+    segfiles = ["../WhisperE+Phi2/data/*.dev.seg.aligned"]
 
-    dataset = ConcatDataset([MyDataset(segfile) for segfile in segfiles])
+    dataset = ConcatDataset([MyDataset(segfile, memory=True) for segfile in segfiles])
 
     model_name = "openai/whisper-large-v2"
 
@@ -453,8 +401,12 @@ if __name__ == "__main__":
     tokenizer.pad_token = tokenizer.eos_token
     processor = WhisperProcessor.from_pretrained(model_name)
 
+    new_tokens = [f"<|memory_{i}|>" for i in range(200)]
+    num_added = tokenizer.add_tokens(new_tokens)
+    print(f"Added {num_added} memory tokens")
+
     data_collator = DataCollatorSpeechSeq2SeqWithPadding(processor=processor, tokenizer=tokenizer)
-    dataloader = DataLoader(dataset, collate_fn=data_collator, batch_size=32)
+    dataloader = DataLoader(dataset, collate_fn=data_collator, batch_size=2)
 
     s = 0
     n = 0

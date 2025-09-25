@@ -116,13 +116,13 @@ class MySeq2SeqTrainerMemory(MySeq2SeqTrainer):
         logs = {}
         index = 0
         prefix = "" if not dev else "eval_"
-        for l in ["_ntp","_mem"]:
-            for m in ["_all","_nomem","_mem"]:
-                if self.statistics[index+2] > 0:
-                    logs[prefix+"loss"+l+m] = self.statistics[index]/self.statistics[index+2]
-                    logs[prefix+"ppl"+l+m] = math.exp(self.statistics[index]/self.statistics[index+2])
-                    logs[prefix+"acc"+l+m] = self.statistics[index+1]/self.statistics[index+2]
-                index += 3
+        l = "_ntp"
+        for m in ["_all","_nomem","_mem"]:
+            if self.statistics[index+2] > 0:
+                logs[prefix+"loss"+l+m] = self.statistics[index]/self.statistics[index+2]
+                logs[prefix+"ppl"+l+m] = math.exp(self.statistics[index]/self.statistics[index+2])
+                logs[prefix+"acc"+l+m] = self.statistics[index+1]/self.statistics[index+2]
+            index += 3
         logs = {k:v for k,v in sorted(list(logs.items()))}
         for i in range(len(self.statistics)):
             self.statistics[i] = 0
@@ -212,6 +212,11 @@ tokenizer = WhisperTokenizerFast.from_pretrained(args.model_name)
 tokenizer.set_prefix_tokens(task="transcribe")
 tokenizer.pad_token = tokenizer.eos_token
 processor = WhisperProcessor.from_pretrained(args.model_name)
+
+if args.use_memory:
+    new_tokens = [f"<|memory_{i}|>" for i in range(200)]
+    num_added = tokenizer.add_tokens(new_tokens)
+    print(f"Added {num_added} memory tokens")
 
 data_collator = DataCollatorSpeechSeq2SeqWithPadding(processor=processor, tokenizer=tokenizer)
 

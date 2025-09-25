@@ -18,6 +18,8 @@ import argparse
 
 from peft import PeftModel
 
+import re
+
 parser = argparse.ArgumentParser()
 
 parser.add_argument('--segfiles', type=str, nargs="+", help='Data used for training', default=["data_test/cv.*.test.seg.aligned"])
@@ -70,7 +72,7 @@ else:
         prefix = " "
 
         def list_to_tensor(memory_words):
-            double = True
+            double = False
             if not double:
                 memory_words = [prefix+w for w in memory_words]
             else:
@@ -102,7 +104,11 @@ else:
             print("MEMORY Function")
     else:
         memory = None
-    
+
+    new_tokens = [f"<|memory_{i}|>" for i in range(1000)]
+    num_added = tokenizer.add_tokens(new_tokens)
+    print(f"Added {num_added} memory tokens")
+
 model = model_class.from_pretrained(args.model_path, torch_dtype="auto", device_map="cuda")
 
 if args.load_adapter_model is not None:
@@ -163,8 +169,19 @@ for i in tqdm(range(0,len(dataset),batch_size)):
         if not text_convert:
             input_features = data["input_features"].cuda()
             model.generation_config.suppress_tokens = [t for t in model.generation_config.suppress_tokens if t!=25] # allow for : to be decoded
-            transcript = model.generate(input_features, forced_decoder_ids=forced_decoder_ids, no_repeat_ngram_size=6, num_beams=args.num_beams, memory=memory_)
+            kwargs = {}
+            if args.use_memory:
+                kwargs["first_memory_id"] = data["first_memory_id"]
+            transcript = model.generate(input_features, forced_decoder_ids=forced_decoder_ids, no_repeat_ngram_size=6, num_beams=args.num_beams, memory=memory_, **kwargs)
             transcript = tokenizer.batch_decode(transcript, skip_special_tokens=True)
+
+            memory_map = {str(i):prefix+w for i,w in enumerate(memory_words)}
+            pattern = r"<\|memory_(\d+)\|>"
+            def replacer(match):
+                key = match.group(1)  # the number inside memory_{i}
+                return memory_map.get(key, f"<missing:{key}>")
+
+            transcript = [re.sub(pattern, replacer, t) for t in transcript]
         else:
             given_hypofile = args.hypo_file.replace("replacements_text_filtered_other.","").replace("replacements_text_filtered.","")
             given_hypos = {words[0]:" ".join(words[1:]) for line in open(given_hypofile) if (words := line.strip().split())}
