@@ -330,62 +330,6 @@ class WhisperForConditionalGenerationMemoryWrapper(WhisperForConditionalGenerati
         #print(lm_logits_nomem.shape, lm_logits_mem.shape)
         #print("logits argmax",lm_logits.argmax(-1))
 
-        """if encoder_outputs and "memory" in encoder_outputs and len(encoder_outputs["memory"]) >= 5: # Replace word by memory entry
-            memory_ = encoder_outputs["memory"]
-            memory_text_ids = encoder_outputs["memory"][4]
-            if type(encoder_outputs["memory"]) is list and len(encoder_outputs["memory"]) >= 5 and memory_text_ids is not None:
-                lm_logits = lm_logits - lm_logits.mean(2,keepdim=True)
-
-                if past_key_values is None: # create indices
-                    indices = torch.full((lm_logits.shape[0],2), -1,
-                                         device=lm_logits.device)
-                else: # read last indices
-                    indices = past_key_values[-1][0]
-
-                mask = outputs['all_memory_cross_attentions'][-1][:,-1].argmax(-1) # b
-                mask2 = mask.gt(0)
-                if mask2.any():
-                    mask_ = mask2 & indices[:,0].eq(-1)
-
-                    #print(f"{mask  = }")
-                    #print(f"{mask_ = }")
-                    #print(f"before {indices = }")
-
-                    indices[:,0][mask_] = mask[mask_]-1
-                    indices[:,1][mask_] = 0
-
-                mask = indices[:,0].ne(-1)
-                if mask.any():
-                    # use indices
-                    index1 = indices[:,0][mask]
-                    tokens = memory_text_ids[index1]
-                    index2 = indices[:,1][mask]
-                    tokens2 = tokens.gather(1,index2.unsqueeze(-1)) # sum(mask) x 1
-                    lm_logits_ = lm_logits[mask]
-                    boost_all = False
-                    eos_token = 50257
-                    if not boost_all:
-                        lm_logits_[:,0].scatter_add_(1,tokens2,torch.full_like(tokens2, encoder_outputs.add_score if encoder_outputs.add_score else 0, dtype=lm_logits.dtype))
-                    else:
-                        add = torch.full_like(tokens, encoder_outputs.add_score if encoder_outputs.add_score else 0, dtype=lm_logits.dtype)
-                        add[tokens.eq(eos_token)] = 0
-                        lm_logits_[:,0].scatter_add_(1,tokens,add)
-                    lm_logits[mask] = lm_logits_
-
-                    tokens2 = tokens.gather(1,(index2+1).unsqueeze(-1)) # sum(mask) x 1
-                    mask2 = tokens2.eq(eos_token)
-                    if mask2.any():
-                        indices_ = indices[:,0][mask]
-                        indices_[mask2[:,0]] = -1
-                        indices[:,0][mask] = indices_
-
-                indices[:,1][indices[:,1].gt(-1)] += 1
-
-                if mask.any():
-                    pass #print(f"after  {indices = }")
-
-                outputs['past_key_values'] = tuple([*outputs['past_key_values'], (indices,)])"""
-
         loss = None
         statistics = None
         if labels is not None:
