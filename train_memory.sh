@@ -1,5 +1,5 @@
 
-model_name="${2:-newwords16}"
+model_name="${2:-newwords18}"
 
 #clear
 

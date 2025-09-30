@@ -112,7 +112,6 @@ class WhisperModelMemory(WhisperModel):
             p.requires_grad = False
 
         self.linear = nn.Linear(config.d_model,config.d_model, bias=False)
-        self.linear2 = nn.Linear(config.d_model,config.d_model, bias=False)
 
     def forward(
         self,
@@ -176,7 +175,7 @@ class WhisperModelMemory(WhisperModel):
             memory_indices.clamp_(min=0)
             decoder_inputs_embeds_mem = memory[1][memory_indices.view(-1)].view(*decoder_input_ids.shape,-1)
             #print(1,decoder_inputs_embeds_mem.std())
-            decoder_inputs_embeds_mem = 0.23*self.linear(decoder_inputs_embeds_mem)
+            decoder_inputs_embeds_mem = 0.03566*self.linear(decoder_inputs_embeds_mem)
             #print(2,decoder_inputs_embeds_mem.std())
 
             memory_mask = decoder_input_ids.lt(first_memory_id).to(memory[1].dtype).unsqueeze(-1)
@@ -186,8 +185,6 @@ class WhisperModelMemory(WhisperModel):
             decoder_input_ids_c.clamp_(max=self.decoder.embed_tokens.weight.shape[0]-1)
             decoder_inputs_embeds_nomem = self.decoder.embed_tokens(decoder_input_ids_c)
             #print(3,decoder_inputs_embeds_nomem.std())
-            decoder_inputs_embeds_nomem = decoder_inputs_embeds_nomem + 0.1*self.linear2(decoder_inputs_embeds_nomem)
-            #print(4,decoder_inputs_embeds_nomem.std())
 
             decoder_inputs_embeds = memory_mask * decoder_inputs_embeds_nomem + (1-memory_mask) * decoder_inputs_embeds_mem
         else:
@@ -261,7 +258,6 @@ class WhisperForConditionalGenerationMemoryWrapper(WhisperForConditionalGenerati
         self.factor = config.d_model ** -0.25
         self.linear = nn.Linear(config.d_model, config.d_model, bias=False)
         self.linear2 = nn.Linear(config.d_model, config.d_model, bias=False)
-        self.linear3 = nn.Linear(config.d_model, config.d_model, bias=False)
 
     def forward(
         self,
@@ -324,16 +320,14 @@ class WhisperForConditionalGenerationMemoryWrapper(WhisperForConditionalGenerati
             #print("logits_mem",lm_logits_mem)
             #lm_logits_mem = lm_logits_mem - lm_logits_mem.mean(-1,keepdim=True)
 
-            decoder_output_nomem = outputs[0] + 0.1*self.linear3(outputs[0]) # b x l_tgt x d_model
-            lm_logits_nomem = self.proj_out(decoder_output_nomem) # b x l_tgt x n_vocab
+            lm_logits_nomem = self.proj_out(outputs[0]) # b x l_tgt x n_vocab
             #print(2,lm_logits_nomem.mean(),lm_logits_nomem.std())
             #print("logits_nomem max",lm_logits_nomem.max(-1)[0])
             #lm_logits_nomem = lm_logits_nomem - lm_logits_nomem.mean(-1,keepdim=True)
 
             lm_logits = torch.cat([lm_logits_nomem,lm_logits_mem],-1) # b x l_tgt x (n_vocab+n_mem)
         else:
-            decoder_output_nomem = self.linear3(outputs[0]) # b x l_tgt x d_model
-            lm_logits = self.proj_out(decoder_output_nomem) # b x l_tgt x n_vocab
+            lm_logits = self.proj_out(outputs[0]) # b x l_tgt x n_vocab
 
         #print(lm_logits_nomem.shape, lm_logits_mem.shape)
         #print("logits argmax",lm_logits.argmax(-1))
@@ -487,6 +481,8 @@ class WhisperForConditionalGenerationMemory(nn.Module):
             config = model.config
             model = WhisperForConditionalGenerationMemoryWrapper(config)
             model.load_state_dict(state_dict, strict=False)
+            state_dict = torch.load("saves/model_newwords15/checkpoint-184000/encoder_memory.pt")
+            model.model.encoder_memory.load_state_dict(state_dict, strict=False)
         else:
             return WhisperForConditionalGenerationMemoryWrapper.from_pretrained(model_name, torch_dtype=torch_dtype, device_map=device_map)
         return model
