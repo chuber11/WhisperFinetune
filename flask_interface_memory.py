@@ -135,7 +135,7 @@ def infer_batch(audio_wavs, prefix="", input_language="en", task="transcribe", a
         #memory["add_score"] = 25
         #print([[processor.tokenizer.decode(i) for i in memory["input_ids"][j]] for j in range(len(memory["input_ids"]))])
         #print(memory["attention_mask"])
-        print(memory_words)
+        #print(memory_words)
     else:
         memory = None
 

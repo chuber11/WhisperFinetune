@@ -429,7 +429,10 @@ class WhisperForConditionalGenerationMemoryWrapper(WhisperForConditionalGenerati
 
     def _prepare_encoder_decoder_kwargs_for_generation(self, inputs_tensor: torch.Tensor, model_kwargs, model_input_name: Optional[str] = None):
         add_score = model_kwargs["memory"].get("add_score", 0) if "memory" in model_kwargs and model_kwargs["memory"] else 0
-        first_memory_id = model_kwargs["memory"].get("first_memory_id", None) if "memory" in model_kwargs and model_kwargs["memory"] else None
+        if "first_memory_id" in model_kwargs:
+            first_memory_id = model_kwargs["first_memory_id"]
+        else:
+            first_memory_id = model_kwargs["memory"].get("first_memory_id", None) if "memory" in model_kwargs and model_kwargs["memory"] else None
 
         memory = model_kwargs["memory"] if "memory" in model_kwargs else None
         memory = self.model.encoder_memory(memory)
