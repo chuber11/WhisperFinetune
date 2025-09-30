@@ -86,7 +86,6 @@ class EncoderMemory(nn.Module):
 @dataclass
 class BaseModelOutputMemory(BaseModelOutput):
     memory: Optional[Tuple[torch.FloatTensor, ...]] = None
-    encoder_outputs_memory: Optional[Tuple[torch.FloatTensor, ...]] = None
     add_score: Optional[int] = None
     first_memory_id: Optional[int] = None
 
@@ -153,7 +152,7 @@ class WhisperModelMemory(WhisperModel):
             )
 
             memory = self.encoder_memory(memory)
-            #print("1) Encoded memory of size", len(memory[0]))
+            #print("1) Encoded memory of size", len(memory))
 
         # If the user passed a tuple for encoder_outputs, we wrap it in a BaseModelOutput when return_dict=True
         elif return_dict and not isinstance(encoder_outputs, BaseModelOutput):
@@ -279,7 +278,6 @@ class WhisperForConditionalGenerationMemoryWrapper(WhisperForConditionalGenerati
         return_dict: Optional[bool] = None,
         memory = None,
         first_memory_id = None,
-        encoder_outputs_memory = None, # always only dummy
     ) -> Union[Tuple[torch.Tensor], Seq2SeqLMOutput]:
         return_dict = return_dict if return_dict is not None else self.config.use_return_dict
 
@@ -430,45 +428,15 @@ class WhisperForConditionalGenerationMemoryWrapper(WhisperForConditionalGenerati
         )
 
     def _prepare_encoder_decoder_kwargs_for_generation(self, inputs_tensor: torch.Tensor, model_kwargs, model_input_name: Optional[str] = None):
-        if not "encoder_outputs_memory" in model_kwargs:
-            model_kwargs = super()._prepare_encoder_decoder_kwargs_for_generation(inputs_tensor, model_kwargs, model_input_name)
-        else:
-            model_kwargs["encoder_outputs"] = model_kwargs["encoder_outputs_memory"]
-            del model_kwargs["encoder_outputs_memory"]
-        encoder_outputs_memory = None
-        if hasattr(self.model.encoder.layers[0].self_attn.k_proj,"lora_A"): # LORA -> have to run encoder without lora weights
-            #print("Running encoder twice...")
-
-            encoder = self.get_encoder()
-            irrelevant_prefix = ["decoder_", "cross_attn", "use_cache"]
-            encoder_kwargs = {
-                argument: value
-                for argument, value in model_kwargs.items()
-                if not any(argument.startswith(p) for p in irrelevant_prefix)
-            }
-            encoder_signature = set(inspect.signature(encoder.forward).parameters)
-            encoder_accepts_wildcard = "kwargs" in encoder_signature or "model_kwargs" in encoder_signature
-            if not encoder_accepts_wildcard:
-                encoder_kwargs = {
-                    argument: value for argument, value in encoder_kwargs.items() if argument in encoder_signature
-                }
-            model_input_name = model_input_name if model_input_name is not None else self.main_input_name
-            encoder_kwargs["return_dict"] = True
-            encoder_kwargs[model_input_name] = inputs_tensor
-            for name, module in encoder.named_modules():
-                if isinstance(module, (BaseTunerLayer, ModulesToSaveWrapper)):
-                    module.enable_adapters(enabled=False)
-            encoder_outputs_memory = encoder(**encoder_kwargs)
-            for name, module in encoder.named_modules():
-                if isinstance(module, (BaseTunerLayer, ModulesToSaveWrapper)):
-                    module.enable_adapters(enabled=True)
         add_score = model_kwargs["memory"].get("add_score", 0) if "memory" in model_kwargs and model_kwargs["memory"] else 0
-        first_memory_id = model_kwargs.get("first_memory_id", None)
+        first_memory_id = model_kwargs["memory"].get("first_memory_id", None) if "memory" in model_kwargs and model_kwargs["memory"] else None
 
         memory = model_kwargs["memory"] if "memory" in model_kwargs else None
         memory = self.model.encoder_memory(memory)
         #print("2) Encoded memory of size", len(memory[0]))
-        model_kwargs["encoder_outputs"] = BaseModelOutputMemory(*model_kwargs["encoder_outputs"].values(),memory=memory, encoder_outputs_memory=encoder_outputs_memory, add_score=add_score, first_memory_id=first_memory_id)
+
+        model_kwargs = super()._prepare_encoder_decoder_kwargs_for_generation(inputs_tensor,        model_kwargs, model_input_name)
+        model_kwargs["encoder_outputs"] = BaseModelOutputMemory(*model_kwargs["encoder_outputs"].values(),memory=memory, add_score=add_score, first_memory_id=first_memory_id)
         #print(model_kwargs["encoder_outputs"])
         return model_kwargs
         

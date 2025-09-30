@@ -1,4 +1,4 @@
-# import os
+import os
 # os.environ["CUDA_VISIBLE_DEVICES"]="0"
 from flask import Flask, request
 import torch
@@ -13,6 +13,7 @@ import traceback
 from transformers import WhisperForConditionalGeneration, WhisperProcessor
 import requests
 from glob import glob
+import re
 
 from model import BaseModelOutputMemory
 from model import WhisperForConditionalGenerationMemory
@@ -25,6 +26,8 @@ app = Flask(__name__)
 initialize_output = {}
 
 def get_latest_adaptation_path(user):
+    if os.path.isdir(user):
+        return user
     peft_model = None
     peft_dirs = sorted(glob(f"saves/model_CL_{user}_*"))
     if len(peft_dirs) > 0:
@@ -46,10 +49,14 @@ def initialize(user=None):
     model_path = filename
     processor = WhisperProcessor.from_pretrained(model_path)
 
+    new_tokens = [f"<|memory_{i}|>" for i in range(1000)]
+    num_added = processor.tokenizer.add_tokens(new_tokens)
+    print(f"Added {num_added} memory tokens")
+
     processor.get_decoder_prompt_ids(language="en", task="transcribe") # WARNING: Changes state of processor
     
-    model_path = "saves/model_newwords15/checkpoint-184000"
-    #model_path = "saves/model_newwords15_2/checkpoint-5000"
+    #model_path = "saves/model_newwords15/checkpoint-184000"
+    model_path = "saves/model_newwords18/checkpoint-37000"
 
     model = WhisperForConditionalGenerationMemory.from_pretrained(model_path)
     #model = WhisperForConditionalGeneration.from_pretrained(model_path)
@@ -72,7 +79,7 @@ def initialize(user=None):
     model.generation_config.begin_suppress_tokens.remove(50257)
     model.generation_config.lang_to_id = {i:i for i in range(50259,50358)}
     
-    max_batch_size = 1
+    max_batch_size = 4
 
     if torch.cuda.is_available():
         model = model.cuda()
@@ -108,7 +115,7 @@ def infer_batch(audio_wavs, prefix="", input_language="en", task="transcribe", a
     memory_prefix = " "
 
     if memory_words is not None and len(memory_words) > 0:
-        double = True #any("->" in w for w in memory_words)
+        double = any("->" in w for w in memory_words)
         if not double:
             memory_words = [memory_prefix+w for w in memory_words]
         else:
@@ -124,7 +131,8 @@ def infer_batch(audio_wavs, prefix="", input_language="en", task="transcribe", a
         memory["input_ids"] = memory["input_ids"][:,4:].to(device)
         memory["attention_mask"] = memory["attention_mask"][:,4:].to(device)
         memory["double"] = double
-        memory["add_score"] = 25
+        memory["first_memory_id"] = processor.tokenizer("<|memory_0|>")["input_ids"][-2]
+        #memory["add_score"] = 25
         #print([[processor.tokenizer.decode(i) for i in memory["input_ids"][j]] for j in range(len(memory["input_ids"]))])
         #print(memory["attention_mask"])
         print(memory_words)
@@ -143,6 +151,17 @@ def infer_batch(audio_wavs, prefix="", input_language="en", task="transcribe", a
 
     text_output_raw = processor.batch_decode(predicted_ids, skip_special_tokens=True)
     lids = [l[2:-2] for l in processor.batch_decode(predicted_ids[:,1])]
+
+    if memory and double:
+        memory_words = memory_words[len(memory_words)//2:]
+
+    memory_map = {str(i):w for i,w in enumerate(memory_words)}
+    pattern = r"<\|memory_(\d+)\|>"
+    def replacer(match):
+        key = match.group(1)  # the number inside memory_{i}
+        return memory_map.get(key, f"<missing:{key}>")
+
+    text_output_raw = [re.sub(pattern, replacer, t) for t in text_output_raw]
 
     #print([[processor.tokenizer.decode(i) for i in predicted_ids[j][1:]] for j in range(len(predicted_ids))])
 
@@ -173,7 +192,7 @@ def use_model(reqs):
         num_beamss.append(num_beams)
         force_languages.append(force_language)
 
-        if user != initialize_output["user"] or get_latest_adaptation_path(user) != initialize_output["peft_model"]:
+        if user is not None and (user != initialize_output["user"] or get_latest_adaptation_path(user) != initialize_output["peft_model"]):
             initialize(user)
 
     if len(set(prefixes)) == 1 and len(set(input_languages)) == 1 and len(set(output_languages)) == 1 and len(set(memory_wordss)) == 1 and len(set(num_beamss)) == 1 and len(set(force_languages)) == 1:
