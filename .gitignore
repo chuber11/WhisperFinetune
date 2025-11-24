@@ -29,3 +29,4 @@ LT_CL/data*
 LT_CL/last_run_day_*
 LT_CL/log.txt
 *.pkl
+confidence/output*
