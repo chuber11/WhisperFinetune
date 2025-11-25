@@ -13,6 +13,7 @@ from typing import Any, Dict, List, Union, Optional
 
 import math
 import random
+import json
 
 import re
 import os
@@ -28,7 +29,7 @@ def replace_except_specified_chars(text):
     return result
 
 class MyDataset(Dataset):
-    def __init__(self, segfiles, dev=False, replace=None, max_len=2000, memory=False, test=False):
+    def __init__(self, segfiles, dev=False, replace=None, max_len=2000, memory=False, test=False, confidence=False):
         if replace is None:
             replace = [("/project/asr_systems/LT2022/data/DE/cv14.0/download","/export/data2/chuber/2024/CV/DE"),
                        ("/project/asr_systems/LT2022/data/EN/cv14.0/download","/export/data2/chuber/2024/CV/EN")]
@@ -39,6 +40,7 @@ class MyDataset(Dataset):
         self.labels = []
 
         self.memory = memory and not test
+        self.confidence = confidence
 
         all_segfiles = glob(segfiles)
         if len(all_segfiles) == 0 and os.path.isfile(segfiles):
@@ -46,6 +48,10 @@ class MyDataset(Dataset):
 
         for segfile in all_segfiles:
             print(segfile)
+            if confidence:
+               self.load_confidence(segfile)
+               continue
+
             labelfile = ".".join(segfile.split(".")[:-2])+".cased"
             if not os.path.isfile(labelfile):
                 labelfile = labelfile[:-len(".cased")]+".ref"
@@ -137,6 +143,40 @@ class MyDataset(Dataset):
 
         print("Dataset has length",len(self))
 
+    def load_confidence(self, segfile):
+        for line in open(segfile):
+            data = json.loads(line.strip())
+
+            label = data["label"]
+            ne = data["ne"]
+            prefix = data["prefix"]
+            suffix = data["suffix"]
+
+            recognized_ne_to_score = {}
+            for hypo, score in data["hypo_to_score"]:
+                recognized_ne = hypo[len(prefix):-len(suffix)].strip()
+                #print(score, recognized_ne)
+                if any(recognized_ne.startswith(ne) for ne in recognized_ne_to_score.keys()):
+                    continue
+                if any(ne.startswith(recognized_ne) for ne in recognized_ne_to_score.keys()):
+                    continue
+                recognized_ne_to_score[recognized_ne] = score
+                
+            if suffix:
+                recognized_ne_to_score = {k:v for k,v in recognized_ne_to_score.items() if suffix.split()[0] not in k}
+            #print(recognized_ne_to_score)
+
+            self.ids.append(data["id"])
+            self.audio_paths.append(data["path"])
+            self.timestamps.append(None)
+            self.labels.append([prefix, ne, suffix, True])
+
+            for k,v in recognized_ne_to_score.items():
+                self.ids.append(data["id"])
+                self.audio_paths.append(data["path"])
+                self.timestamps.append(None)
+                self.labels.append([prefix, k, suffix, False])
+
     def __len__(self):
         return self.len
 
@@ -160,6 +200,17 @@ class MyDataset(Dataset):
 
             sample["memory_words"] = memory_words
             sample["memory_word_dummys"] = random.sample(self.new_words,4)
+
+        if self.confidence:
+            sample["confidence"] = sample["labels"].pop(3)
+            sample["labels_parts"] = sample["labels"]
+            label = ""
+            if sample["labels"][0]:
+                label += sample["labels"][0]+" "
+            label += sample["labels"][1]
+            if sample["labels"][2]:
+                label += " "+sample["labels"][2]
+            sample["labels"] = label
 
         return sample
 
@@ -226,13 +277,14 @@ class DataCollatorSpeechSeq2SeqWithPadding:
     tokenizer: Any
     return_ids: bool = False
 
-    def __call__(self, features: List[Dict[str, Union[List[int], torch.Tensor]]],                 inference=False) -> Dict[str, torch.Tensor]:
+    def __call__(self, features: List[Dict[str, Union[List[int], torch.Tensor]]], inference=False) -> Dict[str, torch.Tensor]:
 
-        audio = torch.cat([self.processor(item["audio"], sampling_rate=16000,                     return_tensors="pt").input_features for item in features], dim=0)
+        audio = torch.cat([self.processor(item["audio"], sampling_rate=16000, return_tensors="pt").input_features for item in features], dim=0)
 
         batch = {"input_features": audio}
 
         has_memory = "memory_words" in features[0]
+        has_confidence = "confidence" in features[0]
 
         if has_memory:
             memory_length_max = 200
@@ -257,17 +309,18 @@ class DataCollatorSpeechSeq2SeqWithPadding:
             
             batch["memory"] = memory
         
-        batch["first_memory_id"] = self.tokenizer("<|memory_0|>")["input_ids"][-2]
+        if not has_confidence:
+            batch["first_memory_id"] = self.tokenizer("<|memory_0|>")["input_ids"][-2]
 
         if features[0]["labels"] is not None:
             text_labels = self.tokenizer([feature["labels"] for feature in features], return_tensors="pt", padding=True)
 
-            text_labels["input_ids"] = torch.cat([
+            """text_labels["input_ids"] = torch.cat([
                 text_labels["input_ids"][:,:1],
                 text_labels["input_ids"][:,3:4],
                 text_labels["input_ids"][:,1:3],
                 text_labels["input_ids"][:,4:]
-                ],1)
+                ],1)"""
 
             input_ids = text_labels["input_ids"][:,:-1]
 
@@ -276,6 +329,24 @@ class DataCollatorSpeechSeq2SeqWithPadding:
             labels[mask.eq(0)] = -100
 
             batch.update({"decoder_input_ids":input_ids, "labels":labels})
+
+        if has_confidence:
+            confidence_label = torch.ones_like(batch["labels"])
+            for i,feature in enumerate(features):
+                if not feature["confidence"]:
+                    label_parts = features[i]["labels_parts"]
+                    if label_parts[0] == "":
+                        ne = label_parts[1]
+                    else:
+                        ne = " "+label_parts[1]
+                    ids = self.tokenizer(ne, add_special_tokens=False).input_ids
+                    for j in range(batch["labels"].shape[1]-len(ids)):
+                        if torch.all(batch["labels"][i,j:j+len(ids)] == torch.tensor(ids)):
+                            confidence_label[i,j:j+len(ids)] = 0
+                            break
+
+            confidence_label[mask.eq(0)] = -100
+            batch["confidence_labels"] = confidence_label
 
         if self.return_ids:
             batch["ids"] = [item["id"] for item in features]
@@ -389,6 +460,26 @@ class DataCollatorMTSeq2SeqWithPadding:
         return batch
 
 if __name__ == "__main__":
+
+    segfile = "confidence/output_conf/dev.txt"
+    dataset = MyDataset(segfile, confidence=True)
+
+    model_name = "openai/whisper-large-v2"
+
+    tokenizer = WhisperTokenizerFast.from_pretrained(model_name)
+    #tokenizer.set_prefix_tokens(language="german", task="transcribe")
+    tokenizer.set_prefix_tokens(task="transcribe")
+    tokenizer.pad_token = tokenizer.eos_token
+    processor = WhisperProcessor.from_pretrained(model_name)
+
+    data_collator = DataCollatorSpeechSeq2SeqWithPadding(processor=processor, tokenizer=tokenizer)
+    dataloader = DataLoader(dataset, collate_fn=data_collator, batch_size=2)
+
+    for batch in dataloader:
+        break
+
+    sys.exit()
+
     segfiles = ["../WhisperE+Phi2/data/*.dev.seg.aligned"]
 
     dataset = ConcatDataset([MyDataset(segfile, memory=True) for segfile in segfiles])

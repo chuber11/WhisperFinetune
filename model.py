@@ -312,6 +312,7 @@ class WhisperForConditionalGenerationMemoryWrapper(WhisperForConditionalGenerati
 
         if memory is not None or encoded_memory is not None:
             mem = self.factor * self.linear(encoded_memory[0]) # n_mem x d_model
+            #print("unemb",mem)
             decoder_output_mem = self.factor * self.linear2(outputs[0]) # b x l_tgt x d_model
             lm_logits_mem = torch.matmul(decoder_output_mem, mem.T) # b x l_tgt x n_mem
             #print(1,lm_logits_mem.mean(),lm_logits_mem.std())
@@ -405,3 +406,42 @@ class WhisperForConditionalGenerationMemory(nn.Module):
     def forward(self, *args, **kwargs):
         return self.model.forward(*args, **kwargs)
 
+class WhisperForConditionalGenerationConfidence(WhisperModel):
+    def __init__(self, config: WhisperConfig):
+        super().__init__(config)
+
+        for p in self.parameters():
+            p.requires_grad = False
+
+        self.proj_out = nn.Linear(config.d_model, 2, bias=False)
+        self.post_init()
+
+    def forward(self, *args, **kwargs):
+        confidence_labels = kwargs.pop("confidence_labels", None)
+        labels = kwargs.pop("labels", None)
+
+        res = super().forward(*args, **kwargs)
+        last_hidden_state = res.last_hidden_state  # b x l_tgt x d_model
+        lm_logits = self.proj_out(last_hidden_state)  # b x l_tgt x 2
+
+        loss = None
+        statistics = None
+        if confidence_labels is not None:
+            loss_fct = CrossEntropyLoss()
+            # move labels to correct device to enable PP
+            labels = confidence_labels.to(lm_logits.device).reshape(-1)
+            lm_logits = lm_logits.view(labels.shape[0], -1)
+
+            loss = loss_fct(lm_logits, labels)
+            res["loss"] = loss
+
+            statistics = []
+
+            mask = labels.ge(0)
+            labels = labels.clamp(min=0)
+            add_loss(statistics, lm_logits, labels, mask) # for acc calc
+           
+            statistics = torch.stack(statistics)
+            res["statistics"] = statistics
+
+        return res

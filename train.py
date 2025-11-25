@@ -1,6 +1,6 @@
 
 from data import MyDataset, ConcatDataset, DataCollatorSpeechSeq2SeqWithPadding, compute_metrics
-from model import WhisperForConditionalGenerationMemory
+from model import WhisperForConditionalGenerationMemory, WhisperForConditionalGenerationConfidence
 
 from transformers import WhisperTokenizerFast
 from transformers import WhisperForConditionalGeneration, WhisperProcessor
@@ -118,6 +118,8 @@ class MySeq2SeqTrainerMemory(MySeq2SeqTrainer):
         prefix = "" if not dev else "eval_"
         l = "_ntp"
         for m in ["_all","_nomem","_mem"]:
+            if len(self.statistics) <= index+2:
+                break
             if self.statistics[index+2] > 0:
                 logs[prefix+"loss"+l+m] = self.statistics[index]/self.statistics[index+2]
                 logs[prefix+"ppl"+l+m] = math.exp(self.statistics[index]/self.statistics[index+2])
@@ -154,6 +156,7 @@ parser.add_argument('--dataset_factors', type=int, nargs="+", help='Upscaling fa
 parser.add_argument('--segfiles_dev', type=str, nargs="+", help='Data used for evaluation', default=["../WhisperE+Phi2/data/cv.*.dev.seg.aligned"])
 parser.add_argument('--dataset_factors_dev', type=int, nargs="+", help='Upscaling factors for evaluation datasets', default=None)
 parser.add_argument('--use_memory', action="store_true", help='Generate memory in dataset')
+parser.add_argument('--train_confidence', action="store_true")
 parser.add_argument('--use_early_stopping', type=int, help='Use early stopping', default=10)
 parser.add_argument('--model_name', type=str, help='Model architecture to train', default="openai/whisper-large-v2")
 parser.add_argument('--model_path', type=str, help='Path to store the trained model', default="./saves/model_test")
@@ -176,6 +179,7 @@ parser.add_argument('--train_embedding', action="store_true", help='Train embedd
 parser.add_argument('--freeze_encoder', action="store_true", help='Freeze the encoder parameters')
 
 args = parser.parse_args()
+args.model_name = "openai/whisper-tiny" # TODO: remove
 print(args)
 
 assert args.eval_steps % args.log_steps == 0
@@ -183,12 +187,15 @@ assert args.eval_steps % args.log_steps == 0
 if args.load == "None":
     args.load = None
 
-if not args.use_memory:
-    model_class = WhisperForConditionalGeneration
-    trainer_class = MySeq2SeqTrainer
-else:
+if args.use_memory:
     model_class = WhisperForConditionalGenerationMemory
     trainer_class = MySeq2SeqTrainerMemory
+elif args.train_confidence:
+    model_class = WhisperForConditionalGenerationConfidence
+    trainer_class = MySeq2SeqTrainerMemory
+else:
+    model_class = WhisperForConditionalGeneration
+    trainer_class = MySeq2SeqTrainer
 
 output_dir=args.model_path
 
@@ -198,18 +205,18 @@ resume = len(checkpoint) > 0
 dataset = {} #DatasetDict()
 
 if len(args.segfiles) == 1 and args.dataset_factors is None:
-    dataset["train"] = MyDataset(args.segfiles[0], memory=args.use_memory)
+    dataset["train"] = MyDataset(args.segfiles[0], memory=args.use_memory, confidence=args.train_confidence)
 else:
-    dataset["train"] = ConcatDataset([MyDataset(s, memory=args.use_memory) for s in args.segfiles], factors=args.dataset_factors)
+    dataset["train"] = ConcatDataset([MyDataset(s, memory=args.use_memory, confidence=args.train_confidence) for s in args.segfiles], factors=args.dataset_factors)
 #dataset["train"][0]
 if len(args.segfiles_dev) == 1 and args.dataset_factors_dev is None:
-    dataset["dev"] = MyDataset(args.segfiles_dev[0], dev=True, memory=args.use_memory)
+    dataset["dev"] = MyDataset(args.segfiles_dev[0], dev=True, memory=args.use_memory, confidence=args.train_confidence)
 else:
-    dataset["dev"] = ConcatDataset([MyDataset(s, dev=True, memory=args.use_memory) for s in args.segfiles_dev], factors=args.dataset_factors_dev)
+    dataset["dev"] = ConcatDataset([MyDataset(s, dev=True, memory=args.use_memory, confidence=args.train_confidence) for s in args.segfiles_dev], factors=args.dataset_factors_dev)
 
 tokenizer = WhisperTokenizerFast.from_pretrained(args.model_name)
-#tokenizer.set_prefix_tokens(language="german", task="transcribe")
-tokenizer.set_prefix_tokens(task="transcribe")
+tokenizer.set_prefix_tokens(language="english", task="transcribe")
+#tokenizer.set_prefix_tokens(task="transcribe")
 tokenizer.pad_token = tokenizer.eos_token
 processor = WhisperProcessor.from_pretrained(args.model_name)
 
@@ -228,6 +235,8 @@ load_adapter = None
 if not resume and args.load is None:
     if model_class == WhisperForConditionalGenerationMemory:
         model = model_class.from_pretrained(args.model_name, torch_dtype="auto", device_map="cuda", init_params=True)
+    elif model_class == WhisperForConditionalGenerationConfidence:
+        model = model_class.from_pretrained(args.model_name, torch_dtype="auto", device_map="cuda")
     else:
         model = model_class.from_pretrained(args.model_name, torch_dtype="auto", device_map="cuda")
 
