@@ -28,12 +28,15 @@ def to_same_prefix_length(data, batch_size):
         else:
             res.append([item])
     res = [b for r in res for b in split_to_batches(r, batch_size)]
+    import random
+    random.seed(21)
+    random.shuffle(res)
     return res
 
 device = "cuda:0" if torch.cuda.is_available() else "cpu"
 torch_dtype = torch.float16 if torch.cuda.is_available() else torch.float32
 
-model_id = "openai/whisper-large-v2"
+model_id = "openai/whisper-tiny" #"openai/whisper-large-v2"
 
 model = AutoModelForSpeechSeq2Seq.from_pretrained(
     model_id, torch_dtype=torch_dtype
@@ -46,10 +49,10 @@ segfiles = {}
 segfiles["train"] = ["../../WhisperE+Phi2/data/cv.EN.train.seg.aligned", "../data/voxpopuli.EN.train.seg.aligned"]
 segfiles["dev"] = ["../../WhisperE+Phi2/data/cv.EN.dev.seg.aligned", "../data/voxpopuli.EN.validation.seg.aligned"]
 
-for set in ["dev","train"]:
-    id_to_nes = get_id_to_nes(f"output/{set}2_filtered.txt")
-    id_to_label = get_id_to_label(segfiles[set])
-    id_to_path = get_id_to_path(segfiles[set])
+for set_ in ["dev","train"]:
+    id_to_nes = get_id_to_nes(f"output/{set_}2_filtered.txt")
+    id_to_label = get_id_to_label(segfiles[set_])
+    id_to_path = get_id_to_path(segfiles[set_])
 
     data = []
     for id,nes_ in id_to_nes.items():
@@ -59,51 +62,95 @@ for set in ["dev","train"]:
             parts = label.split(ne)
             prefix = parts[0].strip()
             suffix = ne.join(parts[1:]).strip()
-            ids = processor.tokenizer(prefix, add_special_tokens=True).input_ids[:-1]
-            data.append({"id": id, "path": path, "prefix": prefix, "suffix": suffix, "prefix_ids": ids, "ne": ne, "label": label})
+            prefix_ids = processor.tokenizer(prefix, add_special_tokens=True).input_ids[:-1]
+            data.append({"id": id, "path": path, "prefix": prefix, "suffix": suffix, "prefix_ids": prefix_ids, "ne": ne, "label": label})
 
-    batch_size_max = 4
+    batch_size_max = 2
+    max_ne_tokens = 5
+
     num_return_sequences = 5
+    num_beams = 5
 
-    if os.path.isfile(f"output_conf/{set}.txt"):
+    if os.path.isfile(f"output_conf/{set_}.txt"):
         continue
 
-    with open(f"output_conf/{set}.txt", "w") as f:
+    with open(f"output_conf/{set_}.txt", "w") as f:
         for batch in tqdm(to_same_prefix_length(data, batch_size_max)):
             audio_arrays = [load_audio(s["path"]) for s in batch]
 
-            inputs = processor(
-                audio_arrays,
-                return_tensors="pt",
-                sampling_rate=16000,
-            ).to(device, torch_dtype)
+            inputs = processor(audio_arrays,return_tensors="pt",sampling_rate=16000).to(device, torch_dtype)
 
-            max_len = max(len(s["prefix_ids"]) for s in batch)
-            decoder_input_ids = torch.full(
-                (len(batch), max_len),
-                processor.tokenizer.pad_token_id,
-                dtype=torch.long,
-            )
+            decoder_input_ids = processor(text=[s["prefix"] for s in batch],return_tensors="pt")["input_ids"].to(device)
 
-            for i, s in enumerate(batch):
-                ids = s["prefix_ids"]
-                decoder_input_ids[i, :len(ids)] = torch.tensor(ids)
-
-            decoder_input_ids = decoder_input_ids.to(device)
-
-            generated = model.generate(
+            res_dict = model.generate(
                 language="en",
                 input_features=inputs.input_features,
                 decoder_input_ids=decoder_input_ids,
-                max_new_tokens=100,
+                max_new_tokens=max_ne_tokens,
                 num_return_sequences=num_return_sequences,
-                num_beams=5,
+                return_dict_in_generate=True,
+                output_hidden_states=True,
+                #no_repeat_ngram_size=5,
+                num_beams=num_beams,
             )
 
-            transcripts = processor.batch_decode(generated, skip_special_tokens=True)
+            encoder_outputs = res_dict["encoder_hidden_states"][-1]
 
-            for s, transcript in zip(batch, split_to_batches(transcripts, num_return_sequences)):
-                s["hypo"] = transcript
+            encoder_outputs2 = []
+            sequences = []
+            indices = []
 
-                f.write(json.dumps(s)+"\n")
+            for i, (s, transcripts) in enumerate(zip(batch,
+                                                     split_to_batches(processor.batch_decode(res_dict["sequences"], skip_special_tokens=True), num_return_sequences))):
+                transcripts = [t[len(s["prefix"]):].strip() for t in transcripts]
+                recognized_nes= set()
+                for t in transcripts:
+                    parts = t.split()
+                    for j in range(len(parts)):
+                        recognized_nes.add(" ".join(parts[:j+1]))
 
+                for ne in recognized_nes:
+                    encoder_outputs2.append(encoder_outputs[i])
+                    indices.append(i)
+                    seq = ""
+                    if s["prefix"].strip() != "":
+                        seq += s["prefix"].strip() + " "
+                    seq += ne
+                    if s["suffix"].strip() != "":
+                        seq += " " + s["suffix"].strip()
+                    sequences.append(seq.strip())
+
+            encoder_outputs2 = torch.stack(encoder_outputs2).to(device)
+
+            decoder_input = processor(text=sequences,return_tensors="pt",padding=True)
+            decoder_input_ids = decoder_input["input_ids"].to(device)
+            decoder_attention_mask = decoder_input["attention_mask"].to(device)
+
+            with torch.no_grad():
+                output = model.forward(
+                    encoder_outputs=[encoder_outputs2],
+                    decoder_input_ids=decoder_input_ids[:, :-1],
+                    decoder_attention_mask=decoder_attention_mask[:, :-1],
+                    return_dict=True
+                )
+
+                log_probs  = torch.nn.functional.log_softmax(output["logits"], dim=-1)
+                token_log_probs = torch.gather(log_probs, 2, decoder_input_ids[:, 1:].unsqueeze(-1)).squeeze(-1)
+
+                mask = decoder_input_ids[:, 1:].ne(processor.tokenizer.pad_token_id).to(log_probs.dtype)
+
+            token_log_probs = token_log_probs * mask
+            seq_scores = (token_log_probs.sum(-1) / mask.sum(-1)).tolist()
+
+            for j in range(len(seq_scores)):
+                idx = indices[j]
+                if not "hypo_to_score" in batch[idx]:
+                    batch[idx]["hypo_to_score"] = {}
+                hypo_to_score = batch[idx]["hypo_to_score"]
+                hypo_to_score[sequences[j]] = seq_scores[j]
+
+            for s in batch:
+                for hypo, score in s["hypo_to_score"].items():
+                    print(f"{s['id'][:5]}\t{s['ne']}\t{score}\t{hypo}")
+                f.write(json.dumps(s) + "\n")
+            
