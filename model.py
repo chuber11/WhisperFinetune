@@ -413,33 +413,36 @@ class WhisperForConditionalGenerationConfidence(WhisperModel):
         for p in self.parameters():
             p.requires_grad = False
 
-        self.proj_out = nn.Linear(config.d_model, 2, bias=False)
+        self.proj_out = nn.Linear(2*config.d_model, 2, bias=False)
         self.post_init()
 
     def forward(self, *args, **kwargs):
         confidence_labels = kwargs.pop("confidence_labels", None)
-        labels = kwargs.pop("labels", None)
+        labels = kwargs.pop("labels")
 
         res = super().forward(*args, **kwargs)
         last_hidden_state = res.last_hidden_state  # b x l_tgt x d_model
-        lm_logits = self.proj_out(last_hidden_state)  # b x l_tgt x 2
+
+        labels_clamp = labels.clamp(min=0)
+        label_emb = self.decoder.embed_tokens(labels_clamp)  # b x l_tgt x d_model
+        lm_logits = self.proj_out(torch.cat([last_hidden_state,label_emb],-1))  # b x l_tgt x 2
 
         loss = None
         statistics = None
         if confidence_labels is not None:
             loss_fct = CrossEntropyLoss()
-            # move labels to correct device to enable PP
-            labels = confidence_labels.to(lm_logits.device).reshape(-1)
-            lm_logits = lm_logits.view(labels.shape[0], -1)
 
-            loss = loss_fct(lm_logits, labels)
+            confidence_labels = confidence_labels.to(lm_logits.device).reshape(-1)
+            lm_logits = lm_logits.view(confidence_labels.shape[0], -1)
+
+            loss = loss_fct(lm_logits, confidence_labels)
             res["loss"] = loss
 
             statistics = []
 
-            mask = labels.ge(0)
-            labels = labels.clamp(min=0)
-            add_loss(statistics, lm_logits, labels, mask) # for acc calc
+            mask = confidence_labels.ge(0)
+            confidence_labels = confidence_labels.clamp(min=0)
+            add_loss(statistics, lm_logits, confidence_labels, mask) # for acc calc
            
             statistics = torch.stack(statistics)
             res["statistics"] = statistics

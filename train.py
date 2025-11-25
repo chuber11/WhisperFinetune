@@ -179,7 +179,6 @@ parser.add_argument('--train_embedding', action="store_true", help='Train embedd
 parser.add_argument('--freeze_encoder', action="store_true", help='Freeze the encoder parameters')
 
 args = parser.parse_args()
-args.model_name = "openai/whisper-tiny" # TODO: remove
 print(args)
 
 assert args.eval_steps % args.log_steps == 0

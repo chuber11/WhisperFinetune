@@ -175,7 +175,7 @@ class MyDataset(Dataset):
                 self.ids.append(data["id"])
                 self.audio_paths.append(data["path"])
                 self.timestamps.append(None)
-                self.labels.append([prefix, k, suffix, False])
+                self.labels.append([prefix, k, suffix, k==ne])
 
     def __len__(self):
         return self.len
