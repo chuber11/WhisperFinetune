@@ -17,6 +17,7 @@ import sys
 from glob import glob
 import os
 import json
+import copy
 
 import subprocess
 
@@ -135,6 +136,12 @@ class MyCallback(TrainerCallback):
         if state.global_step == 1:
             pass #control.should_evaluate = True
 
+class SaveFullModelCallback(TrainerCallback):
+    def on_save(self, args, state, control, **kwargs):
+        model = kwargs["model"].merge_and_unload()
+        model.save_pretrained(f"{args.output_dir}/checkpoint-{state.global_step}/full", safe_serialization=False)
+        return control
+
 def add_lora(model, factorization_rank, factorization_only_decoder):
     if not factorization_only_decoder:
         peft_config = LoraConfig(inference_mode=False, r=factorization_rank, lora_alpha=16, lora_dropout=0.1, bias="all", target_modules=["q_proj", "k_proj", "v_proj", "out_proj", "fc1", "fc2"])
@@ -179,6 +186,7 @@ parser.add_argument('--train_embedding', action="store_true", help='Train embedd
 parser.add_argument('--freeze_encoder', action="store_true", help='Freeze the encoder parameters')
 
 args = parser.parse_args()
+#args.model_name = "openai/whisper-tiny"
 print(args)
 
 assert args.eval_steps % args.log_steps == 0
@@ -292,6 +300,12 @@ if args.freeze_encoder:
     for p in model.get_encoder().parameters():
         p.requires_grad = False
 
+"""model_ = model_class.from_pretrained("saves/model_confidence_large-v2/checkpoint-15000/full", torch_dtype="auto", device_map="cuda")
+peft_model_ = PeftModel.from_pretrained(model_, "saves/model_confidence_large-v2/checkpoint-15000")
+model.load_state_dict(peft_model_.state_dict())
+del peft_model_
+del model_"""
+
 print(f"Number of parameters: {sum(p.numel() for p in model.parameters())/1000000:.0f} M, number of trainable parameters: {sum(p.numel() for p in model.parameters() if p.requires_grad)/1000000:.0f} M")
 
 training_args = Seq2SeqTrainingArguments(
@@ -329,7 +343,9 @@ trainer = trainer_class(
     compute_metrics=compute_metrics,
     #tokenizer=processor.feature_extractor,
     #tokenizer=processor.tokenizer,
-    callbacks=[MyCallback]+([EarlyStoppingCallback(early_stopping_patience=args.use_early_stopping)] if args.use_early_stopping>0 else []),
+    callbacks=[MyCallback]+
+              ([EarlyStoppingCallback(early_stopping_patience=args.use_early_stopping)] if args.use_early_stopping>0 else [])+
+              ([SaveFullModelCallback()] if args.factorization_rank > 0 and args.train_confidence else []),
 )
 
 trainer.train(resume_from_checkpoint=resume)

@@ -227,8 +227,8 @@ class Seq2SeqLMOutputMemory(Seq2SeqLMOutput):
 
 def get_loss(logits, labels, mask, mean=False): # shapes L x N, L, L
     #if labels.max() >= logits.shape[1] or labels.min() < 0:
-        #print("WARNING: Label indices not in range! Ignoring.")
-        #return 0
+    #    print("WARNING: Label indices not in range! Ignoring.")
+    #    return 0
     if not mean:
         return -F.log_softmax(logits, -1).gather(1, labels.unsqueeze(-1))[:,0][mask].sum()
     else:
@@ -278,6 +278,7 @@ class WhisperForConditionalGenerationMemoryWrapper(WhisperForConditionalGenerati
         return_dict: Optional[bool] = None,
         memory = None,
         first_memory_id = None,
+        cache_position = None,
     ) -> Union[Tuple[torch.Tensor], Seq2SeqLMOutput]:
         return_dict = return_dict if return_dict is not None else self.config.use_return_dict
 
@@ -372,7 +373,7 @@ class WhisperForConditionalGenerationMemoryWrapper(WhisperForConditionalGenerati
             statistics=statistics,
         )
 
-    def _prepare_encoder_decoder_kwargs_for_generation(self, inputs_tensor: torch.Tensor, model_kwargs, model_input_name: Optional[str] = None):
+    def _prepare_encoder_decoder_kwargs_for_generation(self, inputs_tensor, model_kwargs, model_input_name, generation_config):
         add_score = model_kwargs["memory"].get("add_score", 0) if "memory" in model_kwargs and model_kwargs["memory"] else 0
         if "first_memory_id" in model_kwargs:
             first_memory_id = model_kwargs["first_memory_id"]
@@ -383,7 +384,7 @@ class WhisperForConditionalGenerationMemoryWrapper(WhisperForConditionalGenerati
         memory = self.model.encoder_memory(memory)
         #print("2) Encoded memory of size", len(memory[0]))
 
-        model_kwargs = super()._prepare_encoder_decoder_kwargs_for_generation(inputs_tensor,        model_kwargs, model_input_name)
+        model_kwargs = super()._prepare_encoder_decoder_kwargs_for_generation(inputs_tensor, model_kwargs, model_input_name, generation_config)
         model_kwargs["encoder_outputs"] = BaseModelOutputMemory(*model_kwargs["encoder_outputs"].values(),memory=memory, add_score=add_score, first_memory_id=first_memory_id)
         #print(model_kwargs["encoder_outputs"])
         return model_kwargs
@@ -413,10 +414,10 @@ class WhisperForConditionalGenerationConfidence(WhisperModel):
         for p in self.parameters():
             p.requires_grad = False
 
-        self.proj_out = nn.Linear(2*config.d_model, 2, bias=False)
+        self.proj_out = nn.Linear(2*config.d_model, 3, bias=False)
         self.post_init()
 
-    def forward(self, *args, **kwargs):
+    def forward(self, *args, first_memory_id=None, **kwargs):
         confidence_labels = kwargs.pop("confidence_labels", None)
         labels = kwargs.pop("labels")
 
@@ -426,6 +427,8 @@ class WhisperForConditionalGenerationConfidence(WhisperModel):
         labels_clamp = labels.clamp(min=0)
         label_emb = self.decoder.embed_tokens(labels_clamp)  # b x l_tgt x d_model
         lm_logits = self.proj_out(torch.cat([last_hidden_state,label_emb],-1))  # b x l_tgt x 2
+
+        res.decoder_hidden_states = lm_logits
 
         loss = None
         statistics = None
@@ -443,7 +446,7 @@ class WhisperForConditionalGenerationConfidence(WhisperModel):
             mask = confidence_labels.ge(0)
             confidence_labels = confidence_labels.clamp(min=0)
             add_loss(statistics, lm_logits, confidence_labels, mask) # for acc calc
-           
+
             statistics = torch.stack(statistics)
             res["statistics"] = statistics
 

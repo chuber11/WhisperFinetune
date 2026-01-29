@@ -33,7 +33,7 @@ def inference():
                 run = False
                 print("Not running because of cost!")
         if run:
-            text_out, used_tokens = run_llm(text, model="gpt-4o-2024-08-06", max_tokens=512, number=0) # used tokens: {'completion_tokens': 16, 'prompt_tokens': 568, 'total_tokens': 584}
+            text_out, used_tokens = run_llm(text, model="gpt-4.1", max_tokens=512, number=3) # used tokens: {'completion_tokens': 16, 'prompt_tokens': 568, 'total_tokens': 584}
             if text and text[-1] != "." and text_out and text_out[-1] == ".":
                 text_out = text_out[:-1]
             text = " "+text_out

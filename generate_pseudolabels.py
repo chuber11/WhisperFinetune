@@ -23,6 +23,7 @@ memoryfilesname = sys.argv[5]
 # Load new_words that have been written in the memory until now to later extract pseudolabels containing them
 new_words = set()
 for j,talk_ in enumerate(open(f"{datadir}/memory_files/order_{memoryfilesname}.txt")):
+    talk_ = talk_.strip()
     if j>i:
         break
 
@@ -31,10 +32,14 @@ for j,talk_ in enumerate(open(f"{datadir}/memory_files/order_{memoryfilesname}.t
 
 # Count the number new words already occured to later split between train and dev sets
 counters = {"train":Counter(), "dev":Counter()}
-for split in ["train","dev"]:
-    counter = counters[split]
-    for file in glob(f"CL/{experimentname}/data/*.{split}.new_words"):
-        for line in open(file):
+for j,talk_ in enumerate(open(f"{datadir}/memory_files/order_{memoryfilesname}.txt")):
+    talk_ = talk_.strip()
+    if j>=i:
+        break
+
+    for split in ["train","dev"]:
+        counter = counters[split]
+        for line in open(f"CL/{experimentname}/data/{talk_}.{split}.new_words"):
             new_words = line.strip().split("|")
             for w in new_words:
                 counter[w] += 1
@@ -49,14 +54,18 @@ for split in ["train","dev"]:
 for line,line2,line3 in zip(open(f"{datadir}/segfiles/{talk}.seg.aligned"),open(f"CL/{experimentname}/hypos/{talk}.hyp"),open(f"{datadir}/segfiles/{talk}.hypo")):
     seg = line.strip().split()
     hypo = line2.strip().split()
-    hypo_baseline = line3.strip().split()
+    hypo_baseline = line3.strip()
     id, hypo = hypo[0], " ".join(hypo[1:])
 
     if seg[0] != id:
         print("ERROR: segfile and hypofile not aligned!")
         continue
 
-    found_new_words = [new_word for new_word in new_words if new_word in replace_except_specified_chars(hypo).split() and new_word not in replace_except_specified_chars(hypo_baseline).split()]
+    hypo_ = replace_except_specified_chars(hypo).split()
+    hypo_baseline = replace_except_specified_chars(hypo_baseline).split()
+
+    found_new_words = [new_word for new_word in new_words if new_word in hypo_]
+    #found_new_words = [new_word for new_word in new_words if new_word in hypo_ and new_words not in hypo_baseline]
     if not found_new_words:
         continue
 
@@ -71,5 +80,9 @@ for line,line2,line3 in zip(open(f"{datadir}/segfiles/{talk}.seg.aligned"),open(
     for w in found_new_words:
         counters[split][w] += 1
 
-print(sum(counters["train"].values()))
+n_found = sum(counters["train"].values())
+print(n_found)
+#if n_found > 0:
+#    import time
+#    time.sleep(1)
 

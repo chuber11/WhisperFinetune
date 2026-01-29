@@ -42,7 +42,8 @@ def initialize(user=None):
         del model
 
     #filename = "large-v2" # ["tiny.en","tiny","base.en","base","small.en","small","medium.en","medium","large-v1","large-v2","large"]
-    filename = "saves/model_newwords15/checkpoint-184000"
+    #filename = "saves/model_newwords15/checkpoint-184000"
+    filename = "saves/model_newwords18_3/checkpoint-85000"
     #filename = "tiny"
     
     #model_path = "openai/whisper-{}".format(filename)
@@ -56,7 +57,7 @@ def initialize(user=None):
     processor.get_decoder_prompt_ids(language="en", task="transcribe") # WARNING: Changes state of processor
     
     #model_path = "saves/model_newwords15/checkpoint-184000"
-    model_path = "saves/model_newwords18/checkpoint-37000"
+    model_path = "saves/model_newwords18/checkpoint-188000"
 
     model = WhisperForConditionalGenerationMemory.from_pretrained(model_path)
     #model = WhisperForConditionalGeneration.from_pretrained(model_path)
@@ -135,7 +136,7 @@ def infer_batch(audio_wavs, prefix="", input_language="en", task="transcribe", a
         #memory["add_score"] = 25
         #print([[processor.tokenizer.decode(i) for i in memory["input_ids"][j]] for j in range(len(memory["input_ids"]))])
         #print(memory["attention_mask"])
-        #print(memory_words)
+        print(memory_words)
     else:
         memory = None
 
@@ -155,13 +156,14 @@ def infer_batch(audio_wavs, prefix="", input_language="en", task="transcribe", a
     if memory and double:
         memory_words = memory_words[len(memory_words)//2:]
 
-    memory_map = {str(i):w for i,w in enumerate(memory_words)}
-    pattern = r"<\|memory_(\d+)\|>"
-    def replacer(match):
-        key = match.group(1)  # the number inside memory_{i}
-        return memory_map.get(key, f"<missing:{key}>")
+    if memory_words:
+        memory_map = {str(i):w for i,w in enumerate(memory_words)}
+        pattern = r"<\|memory_(\d+)\|>"
+        def replacer(match):
+            key = match.group(1)  # the number inside memory_{i}
+            return memory_map.get(key, f"<missing:{key}>")
 
-    text_output_raw = [re.sub(pattern, replacer, t) for t in text_output_raw]
+        text_output_raw = [re.sub(pattern, replacer, t) for t in text_output_raw]
 
     #print([[processor.tokenizer.decode(i) for i in predicted_ids[j][1:]] for j in range(len(predicted_ids))])
 
@@ -295,7 +297,7 @@ def inference(input_language, output_language):
         memory: list = json.loads(memory.read().decode("utf-8"))
         
         if memory is not None:
-            memory_individual_words = True
+            memory_individual_words = False
             if memory_individual_words:
                 memory = [word for it in memory for word in it.split()]
             memory = sorted(list(set(memory)))
@@ -390,7 +392,7 @@ def extract_words_route():
 
 @app.route("/asr/available_languages", methods=["GET","POST"])
 def languages():
-    return ["en","de"]
+    return ["en","de","Context biasing"]
 
 initialize()
 

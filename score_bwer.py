@@ -16,6 +16,7 @@ logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
 logger.addHandler(logging.StreamHandler())
 
+import re
 
 class Code(Enum):
     match = 1
@@ -52,7 +53,7 @@ class WordError(object):
 
     def get_result_string(self):
         return (
-            f"error_rate={self.get_wer():.1f}, "
+            f"error_rate={self.get_wer():.2f}, "
             f"ref_words={self.ref_words}, "
             f"subs={self.errors[Code.substitution]}, "
             f"ins={self.errors[Code.insertion]}, "
@@ -210,6 +211,8 @@ class EditDistance(object):
 
         return self.get_result(refs, hyps)
 
+def tag(ref_words, biasing_words):
+    return [w if w not in biasing_words else f"<tag {w}>" for w in ref_words]
 
 def main(args):
     refs = {}
@@ -248,9 +251,19 @@ def main(args):
     wer = WordError()
     u_wer = WordError()
     b_wer = WordError()
+
+    references = []
+    hypotheses = []
+
+    #sub = 0
+    #total = 0
+
+    all_biasing_words_ordered = [line.strip().split("|") for line in open(args.biasing_list.replace("all",""))]
+
     for uttid in refs:
         if uttid not in hyps:
             continue
+        current_biasing_words = all_biasing_words_ordered[len(references)]
         if not args.lowercase:
             ref_tokens = replace_except_specified_chars(refs[uttid]["text"]).split()
             biasing_words = refs[uttid]["biasing_words"]
@@ -259,9 +272,18 @@ def main(args):
             ref_tokens = [w.lower() for w in replace_except_specified_chars(refs[uttid]["text"]).split()]
             biasing_words = set(w.lower() for w in refs[uttid]["biasing_words"])
             hyp_tokens = [w.lower() for w in replace_except_specified_chars(hyps[uttid]).split()]
+            current_biasing_words = [w.lower() for w in current_biasing_words]
+
+        references.append(" ".join(tag(ref_tokens,current_biasing_words)))
+        hypotheses.append(hyp_tokens) #" ".join(hyp_tokens))
         ed = EditDistance()
         result = ed.align(ref_tokens, hyp_tokens)
         for code, ref_idx, hyp_idx in zip(result.codes, result.refs, result.hyps):
+            #if ref_tokens[ref_idx] in biasing_words and code != Code.match:
+                #if code in [Code.insertion,Code.substitution]:
+                #    sub += 1
+                #total += 1
+
             if code == Code.match:
                 wer.ref_words += 1
                 if ref_tokens[ref_idx] in biasing_words:
@@ -297,6 +319,42 @@ def main(args):
     print(f"WER: {wer.get_result_string()}")
     print(f"U-WER: {u_wer.get_result_string()}")
     print(f"B-WER: {b_wer.get_result_string()}")
+
+    tp = 0
+    fp = 0
+    fn = 0
+    for r,h in zip(references,hypotheses):
+        for match in re.findall(r"<tag (\w+)>", r):
+            if match in h:
+                tp += 1
+            else:
+                fn += 1
+            if match in ["and","of"]:
+                continue
+            for r2,h2 in zip(references,hypotheses):
+                if match in h2 and not match in r2:
+                    #print(f"{r = },\n{h = },\n{match = },\n{r2 = },\n{h2 = }\n")
+                    #print(match)
+                    fp += 1
+
+    precision = tp / (tp+fp)
+    recall = tp / (tp+fn)
+
+    f1 = 2*(precision*recall)/(precision+recall)
+    print(f"Recall: {recall:.3f}")
+    print(f"Precision: {precision:.3f}")
+    print(f"F1: {f1:.3f}")
+
+    #print(sub,total,sub/total)
+
+    hypotheses = [" ".join(h) for h in hypotheses]
+
+    """import sys
+    sys.path.append("PIER-CodeSwitching-Evaluation/jiwer/")
+    from measures import pier
+    error = pier(references, hypotheses)
+    print(f"PIER-REST: error_rate={error['rest']['PIER']:.2f}, ref_words={error['rest']['otherWords']}, subs={error['rest']['substitutions']}, ins={error['rest']['insertions']}, dels={error['rest']['deletions']}")
+    print(f"PIER-POI: error_rate={error['poi']['PIER']:.2f}, ref_words={error['poi']['poiWords']}, subs={error['poi']['substitutions']}, ins={error['poi']['insertions']}, dels={error['poi']['deletions']}")"""
 
 
 if __name__ ==  "__main__":

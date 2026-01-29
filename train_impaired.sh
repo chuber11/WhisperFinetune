@@ -27,7 +27,7 @@ python -u train.py --model_path ./saves/model_$model_name \
     --segfiles_dev "data_impairedSpeech_new$version/impairedSpeech.DE.dev.seg.aligned" \
     --warmup_steps 100 --learning_rate 1e-5 \
     --log_steps 10 --model_name data_impairedSpeech \
-    --eval_steps 10 --use_early_stopping 20 \
+    --eval_steps 10 --use_early_stopping 10 \
     `#--gradient_checkpointing` \
     `#--factorization_rank 16` `#--factorization_only_decoder` \
     --batch_size 4 --gradient_accumulation_steps 64 \

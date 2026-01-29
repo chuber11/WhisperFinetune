@@ -18,8 +18,11 @@ def normalize(s):
 id2terms = {line.strip().split()[0]:get_target(line2) for line,line2 in zip(open("/export/data2/chuber/2024/YTData/test_final.seg.aligned"),open("/export/data2/chuber/2024/YTData/test_final.term"))}
 id2labels = {line.strip().split()[0]:line2.strip() for line,line2 in zip(open("/export/data2/chuber/2024/YTData/test_final.seg.aligned"),open("/export/data2/chuber/2024/YTData/test_final.cased"))}
 
+id2data = {}
+
 for f in sorted(glob("hypos/*youtube*")):
-    print(f[len("hypos/"):])
+    app = f[len("hypos/hypo_"):]
+    print(app)
 
     stats = {}
     refs = []
@@ -35,14 +38,19 @@ for f in sorted(glob("hypos/*youtube*")):
         if not category in stats:
             stats[category] = [0,0]
         for t in terms:
-            if t in transcript:
+            correct = t in transcript
+            if correct:
                 stats[category][0] += 1
             else:
-                if False: #"converted" in f: # and category == "timestamp":
+                if "atchweighting0_fact0_freeze0_real_dev_data0_lr1.0003e-6_train_emb0_checkpoint-900" in f and category == "timestamp":
                     print(f"Numeric expression = '{t}'")
                     print(f"{transcript = }")
                     print(f"{label =      }")
             stats[category][1] += 1
+
+        if id not in id2data:
+            id2data[id] = {"category": category, "terms": terms, "label": label}
+        id2data[id][app] = transcript
 
         refs.append(normalize(label))
         hypos.append(normalize(transcript))
@@ -53,4 +61,18 @@ for f in sorted(glob("hypos/*youtube*")):
         print(f"    {category = :15s}: {s[0]:4d}/{s[1]:4d} = {100*s[0]/s[1]:4.1f}%")
 
     print("    WER: {:.1f}".format(100*jiwer.wer(refs, hypos)))
+
+"""cat = "quantity"
+app1 = "openai_whisper-large-v2_beam4.numbers_youtube.txt"
+app2 = "openai_whisper-large-v2_converted_beam4.numbers_youtube.txt"
+
+for id, data in id2data.items():
+    if data["category"] != cat:
+        continue
+    for t in data["terms"]:
+        if t in data[app1] and t not in data[app2]:
+            print(f"Numeric expression = '{t}'")
+            print(f"{app1:60s}: {data[app1] = }")
+            print(f"{app2:60s}: {data[app2] = }")
+            print(f"{label =      }")"""
 

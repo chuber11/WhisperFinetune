@@ -32,8 +32,15 @@ for testset in ["earnings","librispeech_asr.CLEAN", "librispeech_asr.OTHER"]:
         print(res)
         allres.append(res)
 
-    for file in glob(f"hypos_memory/saves_model_newwords18_2_checkpoint-94000*.EN.data_filtered_test_{testset}_memory.EN.test.allwords.*.*.hyp"):
-        if not "baseline_adapt" in file:
+    models = [f"hypos_memory/saves_model_newwords18_2_checkpoint-94000*.EN.data_filtered_test_{testset}_memory.EN.test.allwords.*.*.hyp",f"hypos_memory/saves_model_qwen2*.EN.data_filtered_test_{testset}_memory.EN.test.allwords.*.*.hyp"]
+
+    for file in [f for m in models for f in glob(m)]:
+        if "qwen" in file:
+            if "random" in file:
+                name = "qwen_random"
+            else:
+                name = "qwen_first"
+        elif not "baseline_adapt" in file:
             name = "context_biasing"
         else:
             name = "context_biasing_adapt"
@@ -41,8 +48,8 @@ for testset in ["earnings","librispeech_asr.CLEAN", "librispeech_asr.OTHER"]:
 
         try:
             res = score(file, testset)
-        except:
-            print(f"WARNING: Could not score {file}")
+        except Exception as e:
+            print(f"WARNING: Could not score {file}, {e}")
             continue
         res["name"] = name
         res["testset"] = testset

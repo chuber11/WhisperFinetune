@@ -1,5 +1,5 @@
 
-model_name="confidence_tiny"
+model_name="confidence_small"
 logfile="logs/log_$model_name.txt"
 
 if [ -e "$logfile" ] && [ "$1" != "-y" ]; then
@@ -16,7 +16,7 @@ fi
 
 python -u train.py --model_path ./saves/model_$model_name \
     --train_confidence \
-    --model_name openai/whisper-tiny \
+    --model_name openai/whisper-small \
     --factorization_rank 32 \
     --segfiles "confidence/output_combined/train.txt" \
     --segfiles_dev "confidence/output_combined/dev.txt" \

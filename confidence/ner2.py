@@ -8,6 +8,8 @@ import os
 segfiles = {}
 segfiles["train"] = ["../../WhisperE+Phi2/data/cv.EN.train.seg.aligned", "../data/voxpopuli.EN.train.seg.aligned"]
 segfiles["dev"] = ["../../WhisperE+Phi2/data/cv.EN.dev.seg.aligned", "../data/voxpopuli.EN.validation.seg.aligned"]
+segfiles["dev_yodas"] = ["../data_yodas/EN.dev.seg.aligned"]
+segfiles["train_yodas"] = ["../data_yodas/EN.train.seg.aligned"]
 
 # load tagger
 tagger = SequenceTagger.load("flair/ner-english-large")
@@ -15,7 +17,7 @@ tagger.to('cuda')
 
 #sentences = ["My name is Wolfgang and I live in Berlin.", "My name is Alexander Waibel and I'm professor in Karlsruhe.","George Washington went to Washington."]
 
-for set in ["dev","train"]:
+for set in segfiles.keys():
     ids = []
     sentences = []
     for segfile in segfiles[set]:
@@ -27,8 +29,10 @@ for set in ["dev","train"]:
 
     length = 64
 
-    if os.path.isfile(f"output/{set}.txt"):
+    if os.path.isfile(f"output/{set}2.txt"):
         continue
+
+    input(f"output/{set}2.txt: Continue?")
 
     with open(f"output/{set}2.txt", "w") as f:
         for ids_,sentences_ in tqdm([[ids[i:i+length],sentences[i:i+length]] for i in range(0,len(sentences),length)]):
@@ -39,3 +43,4 @@ for set in ["dev","train"]:
                 nes = [r.text for r in sentence.get_spans('ner')]
                 if nes:
                     f.write(f"{id} {';'.join(nes)}\n")
+

@@ -16,9 +16,7 @@ for line in open(f"hypos_confidence/dev{n}.txt"):
         id_to_data[id] = []
     id_to_data[id].append(data)
 
-correct_scores = []
-correct_scores_ne = []
-incorrect_scores_ne = []
+confusion_matrix = [[0 for _ in range(3)] for _ in range(3)]
 for id, data in tqdm(id_to_data.items()):
     # for one id the prefix and suffix of all the list items are the same
     # extract prefix and suffix
@@ -52,38 +50,23 @@ for id, data in tqdm(id_to_data.items()):
             break
 
     for word, score, label in prefix:
-        if label == 0:
-            correct_scores.append(score[0])
-        else:
-            pass #print("WARNING")
+        argmax = max(range(len(score)), key=score.__getitem__)
+        confusion_matrix[label][argmax] += 1
     for word, score, label in suffix:
-        if label == 0:
-            correct_scores.append(score[0])
-        else:
-            pass #print("WARNING")
+        argmax = max(range(len(score)), key=score.__getitem__)
+        confusion_matrix[label][argmax] += 1
 
     for item in data:
         for word, score, label in item:
-            if label == 1:
-                correct_scores_ne.append(score[1])
-            else:
-                incorrect_scores_ne.append(score[2])
-            #if label != 0:
-            #    correct_scores_ne.append(score[1]+score[2])
+            argmax = max(range(len(score)), key=score.__getitem__)
+            confusion_matrix[label][argmax] += 1
 
-print(len(correct_scores)+len(correct_scores_ne)+len(incorrect_scores_ne))
+# normalize confusion matrix
+for i in range(3):
+    row_sum = sum(confusion_matrix[i])
+    if row_sum > 0:
+        confusion_matrix[i] = [x / row_sum for x in confusion_matrix[i]]
 
-# Calculate mean and std of correct_scores
-mean = sum(correct_scores) / len(correct_scores)
-std = (sum((x - mean) ** 2 for x in correct_scores) / len(correct_scores)) ** 0.5
-print(f"Mean:              {100*mean:.2f}, Std:              {100*std:.2f}")
-
-# Calculate mean and std of correct_scores_ne
-mean_ne = sum(correct_scores_ne) / len(correct_scores_ne)
-std_ne = (sum((x - mean_ne) ** 2 for x in correct_scores_ne) / len(correct_scores_ne)) ** 0.5
-print(f"Mean NE:           {100*mean_ne:.2f}, Std NE:           {100*std_ne:.2f}")
-
-# Calculate mean and std of incorrect_scores_ne
-mean_incorrect_ne = sum(incorrect_scores_ne) / len(incorrect_scores_ne)
-std_incorrect_ne = (sum((x - mean_incorrect_ne) ** 2 for x in incorrect_scores_ne) / len(incorrect_scores_ne)) ** 0.5
-print(f"Mean Incorrect NE: {100*mean_incorrect_ne:.2f}, Std Incorrect NE: {100*std_incorrect_ne:.2f}")
+print("Confusion Matrix:")
+for row in confusion_matrix:
+    print("\t".join(map(lambda v:f"{100*v:4.1f}", row)))

@@ -17,8 +17,9 @@ date_file="last_run_day_$user.txt"
 if [[ -f "$date_file" ]]; then
 	last_run_date=$(cat "$date_file")
 else
-    last_run_date=$(date +%Y-%m-%d)
-    last_run_date=$(date -I -d "$last_run_date - 1 day")
+    #last_run_date=$(date +%Y-%m-%d)
+    #last_run_date=$(date -I -d "$last_run_date - 1 day")
+    last_run_date=2024-08-24
 fi
 
 today=$(date +%Y-%m-%d)

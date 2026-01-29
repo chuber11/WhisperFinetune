@@ -28,11 +28,12 @@ mkdir -p CL/$experiment_name/data
 i=0
 num_utt_adapt=0
 
-adapter_model="./saves/model_baseline_adapt" # baseline whisper model adapted on cv and voxpopuli
+adapter_model_init="./saves/model_baseline_adapt" # baseline whisper model adapted on cv and voxpopuli
+adapter_model=$adapter_model_init
 
 while IFS= read -r talk; do
     segfile="$news_data_dir/segfiles/$talk.seg.aligned"
-    memory_file="$news_data_dir/memory_files/$experiment_name/$talk.memory"
+    memory_file="$news_data_dir/memory_files/$memoryfilesname/$talk.memory"
     hypofile="CL/$experiment_name/hypos/$talk.hyp"
 
     # Decode talk
@@ -44,14 +45,15 @@ while IFS= read -r talk; do
 
     # Generate pseudolabel data files
     echo Generating segfiles CL/$experiment_name/data/$talk.*
-    num_utt=`python generate_pseudolabels.py $talk $i $news_data_dir $experiment_name $memoryfilesname | tail -n1`
+    #num_utt=`python generate_pseudolabels.py $talk $i $news_data_dir $experiment_name $memoryfilesname | tail -n1`
+    num_utt=`python generate_pseudolabels.py $talk $i $news_data_dir $experiment_name $memoryfilesname`
 
     # Learn new factorization weights
     if (( num_utt > num_utt_adapt + min_utt_inc )); then
         if [ ! -e "CL/$experiment_name/models/model_$i" ]; then
             echo Learning new factorization weights CL/$experiment_name/models/model_$i
             python -u train.py --model_path CL/$experiment_name/models/model_$i \
-                --load $adapter_model \
+                --load $adapter_model_init \
                 --segfiles "data/cv.*.train.seg.aligned" "data/voxpopuli.EN.train.seg.aligned" "/project/OML/chuber/2023/data/earnings_nw_dataset/aligned_21/nw.*.train.*.seg.aligned" "CL/$experiment_name/data/*.train.seg.aligned" \
                 --dataset_factors 1 1 $dataset_factor $dataset_factor \
                 --segfiles_dev "/project/OML/chuber/2023/data/earnings_nw_dataset/aligned_21/nw.*.test.seg.aligned" "CL/$experiment_name/data/*.dev.seg.aligned" \

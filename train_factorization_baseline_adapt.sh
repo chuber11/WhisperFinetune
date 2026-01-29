@@ -1,5 +1,8 @@
 
-model_name="confidence_tiny"
+model_name="${2:-baseline_adapt_yodas}"
+
+#export CUDA_VISIBLE_DEVICES=1
+
 logfile="logs/log_$model_name.txt"
 
 if [ -e "$logfile" ] && [ "$1" != "-y" ]; then
@@ -15,15 +18,13 @@ if [ -e "$logfile" ] && [ "$1" != "-y" ]; then
 fi
 
 python -u train.py --model_path ./saves/model_$model_name \
-    --train_confidence \
-    --model_name openai/whisper-tiny \
-    --factorization_rank 32 \
-    --segfiles "confidence/output_combined/train.txt" \
-    --segfiles_dev "confidence/output_combined/dev.txt" \
-    --warmup_steps 100 --learning_rate 1e-4 \
+    --segfiles "data_yodas/EN.train.seg.aligned" \
+    --segfiles_dev "data_yodas/EN.dev.seg.aligned" \
+    --warmup_steps 500 --learning_rate 5e-5 \
     --log_steps 10 \
-    --eval_steps 500 --use_early_stopping 10 \
+    --eval_steps 500 \
     `#--gradient_checkpointing` \
-    --batch_size 32 --gradient_accumulation_steps 1 \
-    | tee -a $logfile
+    --factorization_rank 8 `#--factorization_only_decoder` \
+    --batch_size 4 --gradient_accumulation_steps 4 \
+    | tee $logfile
 

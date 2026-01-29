@@ -12,6 +12,22 @@ def get_mp3_length(file_path):
         print(f"Error: {e}")
         return 0
 
+for segfile in [#"data_filtered_test/earnings_memory.EN.test.seg.aligned",
+                "data_filtered_test/librispeech_asr.CLEAN_memory.EN.test.seg.aligned",
+                "data_filtered_test/librispeech_asr.OTHER_memory.EN.test.seg.aligned"]:
+    s = 0
+
+    lines = open(segfile).readlines()
+
+    for line in tqdm(lines):
+        mp3 = line.strip().split()[1]
+
+        d = get_mp3_length(mp3)
+        s += d
+
+    print(f"Segfile: {segfile}, Hours: {s/60/60:.2f}")
+
+exit()
 
 for lang in ["EN","DE"]:
     for f in glob(f"hypos/hypo_openai_whisper-large-v2_cv_filtered_beam4.{lang}.txt"):

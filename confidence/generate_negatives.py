@@ -10,6 +10,7 @@ import random
 import queue
 import threading
 import time
+from glob import glob
 
 def load_audio(path, target_sr=16000):
     s,r = "/project/asr_systems/LT2022/data/EN/cv14.0/download","/export/data2/chuber/2024/CV/EN"
@@ -49,20 +50,39 @@ model = AutoModelForSpeechSeq2Seq.from_pretrained(
 processor = AutoProcessor.from_pretrained(model_id)
 processor.get_decoder_prompt_ids(language="en", task="transcribe") # Changes internal state
 
-segfiles = {}
-segfiles["train"] = ["../../WhisperE+Phi2/data/cv.EN.train.seg.aligned", "../data/voxpopuli.EN.train.seg.aligned"]
-segfiles["dev"] = ["../../WhisperE+Phi2/data/cv.EN.dev.seg.aligned", "../data/voxpopuli.EN.validation.seg.aligned"]
+segfiles = []
+for f in glob(f"../data/*EN*.seg.aligned"):
+    segfiles.append(f)
+for f in glob(f"../data_yodas/*EN*.seg.aligned"):
+    segfiles.append(f)
+segfiles = [f for f in segfiles if "train" in f or "dev" in f]
+segfiles = [f for f in segfiles if "dev" in f]+[f for f in segfiles if not "dev" in f]
 
-for set_ in ["dev","train"]:
-    id_to_nes = get_id_to_nes(f"output/{set_}2_filtered.txt")
-    id_to_label = get_id_to_label(segfiles[set_])
-    id_to_path = get_id_to_path(segfiles[set_])
+for segfile in segfiles:
+    labelfile = segfile.replace(".seg.aligned",".cased")
+    dataset_name = labelfile.split('/')[-1]
+    rarefile = f"output_rare/{dataset_name}_filtered.txt"
+
+    if os.path.isfile(f"output_conf/{dataset_name}.txt"):
+        continue
+    print(f"Processing {segfile}")
+
+    id_to_label = get_id_to_label([segfile])
+    id_to_path = get_id_to_path([segfile])
 
     data = []
-    for id,nes_ in id_to_nes.items():
+    for line in tqdm(open(rarefile).readlines()):
+        line = line.strip().split()
+        id = line[0]
+        if len(line) < 2:
+            continue
+        nes_ = line[1].split(";")
+
         label = id_to_label[id]
         path = id_to_path[id]
         for ne in nes_:
+            if not ne:
+                continue
             parts = label.split(ne)
             prefix = parts[0].strip()
             suffix = ne.join(parts[1:]).strip()
@@ -71,11 +91,8 @@ for set_ in ["dev","train"]:
 
     batch_size_max = 2
     max_ne_tokens = 8
-    num_return_sequences = 4
+    num_return_sequences = 1
     num_beams = 4
-
-    if os.path.isfile(f"output_conf/{set_}.txt"):
-        continue
 
     batches = to_same_prefix_length(data, batch_size_max)
     q = queue.Queue()
@@ -84,7 +101,7 @@ for set_ in ["dev","train"]:
         for i,batch in enumerate(tqdm(batches)):
             while q.qsize() > 20:
                 time.sleep(0.1)
-            if q.qsize() != 20:
+            if False: #q.qsize() != 20:
                 print(f"Loaded {i}/{len(batches)} batches, queue size {q.qsize()}")
             
             audio_arrays = [load_audio(s["path"]) for s in batch]
@@ -97,7 +114,7 @@ for set_ in ["dev","train"]:
     thread = threading.Thread(target=load, args=(q, batches))
     thread.start()
 
-    with open(f"output_conf/{set_}.txt", "w") as f:
+    with open(f"output_conf/{dataset_name}.txt", "w") as f:
         while True:
             batch = q.get()
             if batch is None:
@@ -108,7 +125,9 @@ for set_ in ["dev","train"]:
                 decoder_input_ids = processor(text=[s["prefix"] for s in batch],return_tensors="pt")["input_ids"][:,:-1].to(device)
 
                 res_dict = model.generate(
-                    language="en",
+                    #inputs.input_features,
+                    #forced_decoder_ids=decoder_input_ids,
+                    #language="en",
                     input_features=inputs.input_features,
                     decoder_input_ids=decoder_input_ids,
                     max_new_tokens=max_ne_tokens,
@@ -127,7 +146,11 @@ for set_ in ["dev","train"]:
 
                 for i, (s, transcripts) in enumerate(zip(batch,
                                                         split_to_batches(res_dict["sequences"].tolist(), num_return_sequences))):
-                    suffix_ids = processor.tokenizer(" "+s["suffix"], add_special_tokens=True).input_ids[4:]
+                    suffix = " "+s["suffix"]
+                    # remove space if suffix starts with punctuation
+                    if suffix[1] in [".",",","!","?",";",":"]:
+                        suffix = suffix[1:]
+                    suffix_ids = processor.tokenizer(suffix, add_special_tokens=True).input_ids[4:]
 
                     ids = set()
                     for transcript in transcripts:

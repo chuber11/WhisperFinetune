@@ -147,35 +147,33 @@ class MyDataset(Dataset):
         for line in open(segfile):
             data = json.loads(line.strip())
 
-            label = data["label"]
-            ne = data["ne"]
-            prefix = data["prefix"]
-            suffix = data["suffix"]
+            if not "label" in data:
+                hypo = data["hypo"]
+                self.ids.append(data["id"])
+                self.audio_paths.append(data["path"])
+                self.timestamps.append((data["start"],data["end"]))
+                self.labels.append(hypo)
+                continue
 
-            recognized_ne_to_score = {}
-            for hypo, score in data["hypo_to_score"]:
-                recognized_ne = hypo[len(prefix):-len(suffix)].strip()
-                #print(score, recognized_ne)
-                if any(recognized_ne.startswith(ne) for ne in recognized_ne_to_score.keys()):
-                    continue
-                if any(ne.startswith(recognized_ne) for ne in recognized_ne_to_score.keys()):
-                    continue
-                recognized_ne_to_score[recognized_ne] = score
-                
-            if suffix:
-                recognized_ne_to_score = {k:v for k,v in recognized_ne_to_score.items() if suffix.split()[0] not in k}
-            #print(recognized_ne_to_score)
+            label = "<|en|>"+data["label"]
+            nes = data["nes"]
 
             self.ids.append(data["id"])
             self.audio_paths.append(data["path"])
             self.timestamps.append(None)
-            self.labels.append([prefix, ne, suffix, True])
+            self.labels.append([label, nes, 0])
 
-            for k,v in recognized_ne_to_score.items():
+            if any(ne["ne_hypo"] != ne["ne"] for ne in nes):
+                for ne in nes:
+                    ne_ = ne["ne"]
+                    ne_hypo_ = ne["ne_hypo"]
+                    label = label.replace(ne_, ne_hypo_)
+                if len(label) > 1.5 * len(data["label"]):
+                    continue
                 self.ids.append(data["id"])
                 self.audio_paths.append(data["path"])
                 self.timestamps.append(None)
-                self.labels.append([prefix, k, suffix, k==ne])
+                self.labels.append([label, nes, 1])
 
     def __len__(self):
         return self.len
@@ -188,7 +186,11 @@ class MyDataset(Dataset):
             #audio = audio[0]
         else:
             #audio, sr = torchaudio.load(self.audio_paths[idx])
-            audio, sr = sf.read(self.audio_paths[idx])
+            try:
+                audio, sr = sf.read(self.audio_paths[idx])
+            except:
+                print("ERROR: Audiofile does not exist:",self.audio_paths[idx])
+                raise
             #audio, sr = librosa.load(self.audio_paths[idx])
         #sample = {"audio":audio[0].numpy(),"labels":self.labels[idx]}
         sample = {"audio":audio,"labels":self.labels[idx], "id":self.ids[idx]}
@@ -202,15 +204,9 @@ class MyDataset(Dataset):
             sample["memory_word_dummys"] = random.sample(self.new_words,4)
 
         if self.confidence:
-            sample["confidence"] = sample["labels"].pop(3)
-            sample["labels_parts"] = sample["labels"]
-            label = ""
-            if sample["labels"][0]:
-                label += sample["labels"][0]+" "
-            label += sample["labels"][1]
-            if sample["labels"][2]:
-                label += " "+sample["labels"][2]
-            sample["labels"] = label
+            if "labels" in sample and isinstance(sample["labels"], list):
+                sample["labels_parts"] = sample["labels"]
+                sample["labels"] = sample["labels"][0]
 
         return sample
 
@@ -284,7 +280,7 @@ class DataCollatorSpeechSeq2SeqWithPadding:
         batch = {"input_features": audio}
 
         has_memory = "memory_words" in features[0]
-        has_confidence = "confidence" in features[0]
+        has_confidence = "labels_parts" in features[0]
 
         if has_memory:
             memory_length_max = 200
@@ -303,24 +299,47 @@ class DataCollatorSpeechSeq2SeqWithPadding:
                     labels = labels.replace(memory_word,f"<|memory_{i}|>")
                 feature["labels"] = labels
 
+            pattern = r'(?:<\|memory_\d+\|>){2,}'
+
+            for feature in features:
+                #print("Labels with memory token:", feature["labels"])
+                for match in re.findall(pattern, feature["labels"][len("<|en|>"):]):
+                    ids = list(map(int, re.findall(r'<\|memory_(\d+)\|>', match)))
+                    if random.random() < 0.5: # 50% chance to merge
+                        #print("Match",match,ids)
+                        feature["labels"] = feature["labels"].replace(match, f"<|memory_{len(memory_words)}|>")
+                        memory_words.append("".join(memory_words[id] for id in ids))
+
             memory = self.tokenizer(memory_words, return_tensors="pt", padding=True)
             memory["input_ids"] = memory["input_ids"][:,3:]
             memory["attention_mask"] = memory["attention_mask"][:,3:]
             
             batch["memory"] = memory
         
-        if not has_confidence:
+        if has_memory:
             batch["first_memory_id"] = self.tokenizer("<|memory_0|>")["input_ids"][-2]
 
         if features[0]["labels"] is not None:
             text_labels = self.tokenizer([feature["labels"] for feature in features], return_tensors="pt", padding=True)
 
-            """text_labels["input_ids"] = torch.cat([
+            #print(1,self.processor.tokenizer.decode(text_labels["input_ids"][0]))
+
+            text_labels["input_ids"] = torch.cat([
                 text_labels["input_ids"][:,:1],
-                text_labels["input_ids"][:,3:4],
-                text_labels["input_ids"][:,1:3],
-                text_labels["input_ids"][:,4:]
-                ],1)"""
+                text_labels["input_ids"][:,4:5],
+                text_labels["input_ids"][:,2:4],
+                text_labels["input_ids"][:,5:]
+                ],1)
+            text_labels["attention_mask"] = torch.cat([
+                text_labels["attention_mask"][:,:1],
+                text_labels["attention_mask"][:,4:5],
+                text_labels["attention_mask"][:,2:4],
+                text_labels["attention_mask"][:,5:]
+                ],1)
+
+            # has to be: START LANG TRANSCRIBE NO_TIMESTAMPS
+            #print(2,self.processor.tokenizer.decode(text_labels["input_ids"][0]))
+            #exit()
 
             input_ids = text_labels["input_ids"][:,:-1]
 
@@ -331,26 +350,29 @@ class DataCollatorSpeechSeq2SeqWithPadding:
             batch.update({"decoder_input_ids":input_ids, "labels":labels})
 
         if has_confidence:
-            confidence_label = torch.ones_like(batch["labels"])
+            confidence_label = torch.zeros_like(batch["labels"])
             for i,feature in enumerate(features):
-                if not feature["confidence"]:
-                    label_parts = features[i]["labels_parts"]
-                    if label_parts[0] == "":
-                        ne = label_parts[1]
-                    else:
-                        ne = " "+label_parts[1]
-                    ids = self.tokenizer(ne, add_special_tokens=False).input_ids
-                    for j in range(batch["labels"].shape[1]-len(ids)):
-                        if torch.all(batch["labels"][i,j:j+len(ids)] == torch.tensor(ids)):
-                            confidence_label[i,j:j+len(ids)] = 0
-                            break
+                label, nes, number = feature["labels_parts"]
+                if not nes:
+                    continue
+                
+                for ne in nes:
+                    ne_ = ne["ne"]
+                    ne_hypo_ = ne["ne_hypo"] if number > 0 else ne["ne"]
+                    confidence = ne_ == ne_hypo_
+
+                    for h in [" "+ne_hypo_, ne_hypo_]:
+                        ids = self.tokenizer(" "+ne_hypo_, add_special_tokens=False).input_ids
+                        for j in range(batch["labels"].shape[1]-len(ids)):
+                            if torch.all(batch["labels"][i,j:j+len(ids)] == torch.tensor(ids)):
+                                confidence_label[i,j:j+len(ids)] = 1 if confidence else 2
 
             confidence_label[mask.eq(0)] = -100
             batch["confidence_labels"] = confidence_label
 
         if self.return_ids:
             batch["ids"] = [item["id"] for item in features]
-
+            
         return batch
 
 def compute_metrics(pred):
@@ -461,7 +483,7 @@ class DataCollatorMTSeq2SeqWithPadding:
 
 if __name__ == "__main__":
 
-    segfile = "confidence/output_conf/dev.txt"
+    segfile = "confidence/output_combined/dev.txt"
     dataset = MyDataset(segfile, confidence=True)
 
     model_name = "openai/whisper-large-v2"
@@ -476,11 +498,16 @@ if __name__ == "__main__":
     dataloader = DataLoader(dataset, collate_fn=data_collator, batch_size=2)
 
     for batch in dataloader:
-        break
+        cl = batch["confidence_labels"]
+        for cl_ in cl:
+            mask = cl_.eq(1) | cl_.eq(2)
+            if mask.any():
+                print(cl_)
 
     sys.exit()
 
-    segfiles = ["../WhisperE+Phi2/data/*.dev.seg.aligned"]
+    #segfiles = ["../WhisperE+Phi2/data/*.dev.seg.aligned"]
+    segfiles = ["data/cv.*.dev.seg.aligned"]
 
     dataset = ConcatDataset([MyDataset(segfile, memory=True) for segfile in segfiles])
 
@@ -497,7 +524,7 @@ if __name__ == "__main__":
     print(f"Added {num_added} memory tokens")
 
     data_collator = DataCollatorSpeechSeq2SeqWithPadding(processor=processor, tokenizer=tokenizer)
-    dataloader = DataLoader(dataset, collate_fn=data_collator, batch_size=2)
+    dataloader = DataLoader(dataset, collate_fn=data_collator, batch_size=16)
 
     s = 0
     n = 0

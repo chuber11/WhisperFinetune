@@ -47,13 +47,13 @@ if __name__ == "__main__":
                 parts = line.strip().split()
                 id = parts[0]
                 nes = parts[1].split(";")
-                nes_filtered = []
+                nes_filtered = set()
                 for ne in nes:
                     ne_clean = replace_except_specified_chars(ne)
                     if lower:
                         ne_clean = ne_clean.lower()
                     if any(w not in commonwords for w in ne_clean.split()):
-                        nes_filtered.append(ne)
-                        break
+                        nes_filtered.add(ne)
+                        #break
                 if nes_filtered:
                     f2.write(f"{id} {';'.join(nes_filtered)}\n")

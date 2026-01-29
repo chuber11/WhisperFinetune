@@ -1,5 +1,5 @@
 
-model_name="confidence_tiny"
+model_name="confidence_large-v2-cont"
 logfile="logs/log_$model_name.txt"
 
 if [ -e "$logfile" ] && [ "$1" != "-y" ]; then
@@ -16,7 +16,7 @@ fi
 
 python -u train.py --model_path ./saves/model_$model_name \
     --train_confidence \
-    --model_name openai/whisper-tiny \
+    --model_name openai/whisper-large-v2 \
     --factorization_rank 32 \
     --segfiles "confidence/output_combined/train.txt" \
     --segfiles_dev "confidence/output_combined/dev.txt" \
@@ -24,6 +24,6 @@ python -u train.py --model_path ./saves/model_$model_name \
     --log_steps 10 \
     --eval_steps 500 --use_early_stopping 10 \
     `#--gradient_checkpointing` \
-    --batch_size 32 --gradient_accumulation_steps 1 \
+    --batch_size 4 --gradient_accumulation_steps 8 \
     | tee -a $logfile
 

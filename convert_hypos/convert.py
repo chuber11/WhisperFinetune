@@ -50,7 +50,7 @@ def get_prompt(number=0):
         return statements
     elif number == 3:
         statements = (
-            "You are provided with a sentence which is either in english or german language. Convert timestamps to a 24 hour format like 18:30 and years to a format like 1789. If the sentence is in english language, convert currency amounts to a format like $1,200 €1,200 (for amounts without cents) and $1,200.00 €1,200.00 (for amounts with cents). For other numbers use the same format but without the currency symbol. If the sentence is in german language, convert currency amounts to a format like 1.200$ 1.200€ (for amounts without cents) and 1.200,00$ 1.200,00€ (for amounts with cents). For other numbers use the same format but without the currency symbol. If none of the before mentioned occur, output the utterance."
+            "You are provided with a sentence which is either in english or german language. Convert timestamps to a 24 hour format like 18:30 and years to a format like 1789. If the sentence is in english language, convert currency amounts to a format like $1,200 €1,200 (for amounts without cents) and $1,200.00 €1,200.00 (for amounts with cents). For other numbers use the same format but without the currency symbol. If the sentence is in german language, convert currency amounts to a format like 1.200$ 1.200€ (for amounts without cents) and 1.200,00$ 1.200,00€ (for amounts with cents). For other numbers use the same format but without the currency symbol. If a number is a price, add $ for english sentences and € for german sentences. If none of the before mentioned occur, output the utterance."
             "The peace treaty, signed in nineteen hundred and five, ended years of warfare.",
             "The peace treaty, signed in 1905, ended years of warfare.",
             "In Italy, I spent fifty euros and sixty dollars on a beautiful hand-painted vase.",
@@ -59,6 +59,10 @@ def get_prompt(number=0):
             "Mein Bruder hat 11$ und 20€ in der Lotterie gewonnen.",
             "The mysterious book cost me twenty-three dollars and seventy-five cents at the old bookstore downtown, which is approximately twenty-one euros and seventy-eight cents.",
             "The mysterious book cost me $23.75 at the old bookstore downtown, which is approximately €21.78.",
+            #"I paid 23.75 for it.",
+            #"I paid $23.75 for it.",
+            #"Ich habe dafür 23.75 gezahlt.",
+            #"Ich habe dafür 23.75€ gezahlt.",
             "Ich habe nur zehn Euro und achtzig Cent in meiner Tasche, das sind etwa elf Dollar und achtundsiebzig Cents.",
             "Ich habe nur 10,80€ in meiner Tasche, das sind etwa 11,78$.",
             "The museum housed over ten thousand historical artifacts.",
@@ -161,11 +165,12 @@ if __name__ == "__main__":
         #"../hypos/hypo_openai_whisper-large-v2_beam4.*.human_train.txt",
         #"../hypos/hypo_openai_whisper-large-v2_cv_filtered_beam4.*.txt",
         "../hypos/hypo_openai_whisper-large-v2_beam4.numbers_youtube.txt",
+        #"../hypos/hypo_saves_model_numbers_batchweighting0_fact0_freeze0_real_dev_data0_lr1.0003e-6_train_emb0_checkpoint-900_beam4.numbers_youtube.txt",
         ]
 
     for files in allfiles:
         for file in glob(files):
-            outfile = open(file.replace("large-v2","large-v2_converted"),"w")
+            outfile = open(file.replace("large-v2","large-v2_converted").replace("checkpoint","checkpoint_converted"),"w")
 
             lines = open(file).readlines()
             #random.shuffle(lines)

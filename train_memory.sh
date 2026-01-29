@@ -1,5 +1,5 @@
 
-model_name="${2:-newwords18}"
+model_name="${2:-newwords18_3}"
 
 #clear
 
@@ -22,9 +22,9 @@ fi
 python -u train.py --model_path ./saves/model_$model_name \
     --segfiles data/*.train.seg.aligned \
     --segfiles_dev data/*.dev.seg.aligned \
-    `#--load saves/model_newwords13` \
+    --load saves/model_newwords18_2 \
     --use_memory \
-    --warmup_steps 500 --learning_rate 1e-4 \
+    --warmup_steps 500 --learning_rate 1e-5 \
     --log_steps 10 \
     --eval_steps 1000 --use_early_stopping 1000 \
     `#--gradient_checkpointing` \
