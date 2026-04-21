@@ -79,6 +79,10 @@ class MyDataset(Dataset):
                     lang = "<|en|>"
                     if "DE" in segfile:
                         lang = "<|de|>"
+                    elif "ZH" in segfile:
+                        lang = "<|zh|>"  
+                    elif "AR" in segfile:
+                        lang = "<|ar|>"
                     prefix = "" if not self.memory else " "
                     self.labels.append(lang+prefix+line2.strip())
             else:
@@ -287,7 +291,7 @@ class DataCollatorSpeechSeq2SeqWithPadding:
             avg_words_per_utterance = 3
 
             info = [(index2, feature, word) for index2, feature in enumerate(features) for word in feature["memory_words"]]
-            info = random.sample(info, avg_words_per_utterance*len(features))
+            info = random.sample(info, min(avg_words_per_utterance*len(features),len(info)))
 
             memory_words = [" "+word for index2, feature, word in info]+[" "+word for feature in features for word in feature["memory_word_dummys"]]
             memory_words = memory_words[:memory_length_max]
@@ -299,16 +303,19 @@ class DataCollatorSpeechSeq2SeqWithPadding:
                     labels = labels.replace(memory_word,f"<|memory_{i}|>")
                 feature["labels"] = labels
 
-            pattern = r'(?:<\|memory_\d+\|>){2,}'
+            join_entries = False
 
-            for feature in features:
-                #print("Labels with memory token:", feature["labels"])
-                for match in re.findall(pattern, feature["labels"][len("<|en|>"):]):
-                    ids = list(map(int, re.findall(r'<\|memory_(\d+)\|>', match)))
-                    if random.random() < 0.5: # 50% chance to merge
-                        #print("Match",match,ids)
-                        feature["labels"] = feature["labels"].replace(match, f"<|memory_{len(memory_words)}|>")
-                        memory_words.append("".join(memory_words[id] for id in ids))
+            if join_entries:
+                pattern = r'(?:<\|memory_\d+\|>){2,}'
+
+                for feature in features:
+                    #print("Labels with memory token:", feature["labels"])
+                    for match in re.findall(pattern, feature["labels"][len("<|en|>"):]):
+                        ids = list(map(int, re.findall(r'<\|memory_(\d+)\|>', match)))
+                        if random.random() < 0.5: # 50% chance to merge
+                            #print("Match",match,ids)
+                            feature["labels"] = feature["labels"].replace(match, f"<|memory_{len(memory_words)}|>")
+                            memory_words.append("".join(memory_words[id] for id in ids))
 
             memory = self.tokenizer(memory_words, return_tensors="pt", padding=True)
             memory["input_ids"] = memory["input_ids"][:,3:]
@@ -483,7 +490,7 @@ class DataCollatorMTSeq2SeqWithPadding:
 
 if __name__ == "__main__":
 
-    segfile = "confidence/output_combined/dev.txt"
+    """segfile = "confidence/output_combined/dev.txt"
     dataset = MyDataset(segfile, confidence=True)
 
     model_name = "openai/whisper-large-v2"
@@ -504,12 +511,16 @@ if __name__ == "__main__":
             if mask.any():
                 print(cl_)
 
-    sys.exit()
+    sys.exit()"""
 
     #segfiles = ["../WhisperE+Phi2/data/*.dev.seg.aligned"]
-    segfiles = ["data/cv.*.dev.seg.aligned"]
+    #segfiles = ["data/cv.*.dev.seg.aligned"]
+    segfiles = ["data_cs_ar/*.*.seg.aligned"]
 
     dataset = ConcatDataset([MyDataset(segfile, memory=True) for segfile in segfiles])
+
+    for d in dataset:
+        print(d)
 
     model_name = "openai/whisper-large-v2"
 

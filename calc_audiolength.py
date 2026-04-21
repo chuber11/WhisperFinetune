@@ -2,19 +2,39 @@
 from glob import glob
 from pydub import AudioSegment
 from tqdm import tqdm
+import subprocess
+import json
 
 def get_mp3_length(file_path):
     try:
+        result = subprocess.run(
+            [
+                "ffprobe",
+                "-v", "quiet",
+                "-print_format", "json",
+                "-show_format",
+                file_path
+            ],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True
+        )
+
+        data = json.loads(result.stdout)
+        return float(data["format"]["duration"])
         audio = AudioSegment.from_file(file_path, format="mp3")
         length_in_seconds = len(audio) / 1000  # Convert milliseconds to seconds
         return length_in_seconds
     except Exception as e:
-        print(f"Error: {e}")
+        breakpoint()
+        #print(f"Error: {e}")
         return 0
 
 for segfile in [#"data_filtered_test/earnings_memory.EN.test.seg.aligned",
-                "data_filtered_test/librispeech_asr.CLEAN_memory.EN.test.seg.aligned",
-                "data_filtered_test/librispeech_asr.OTHER_memory.EN.test.seg.aligned"]:
+                #"data_filtered_test/librispeech_asr.CLEAN_memory.EN.test.seg.aligned",
+                #"data_filtered_test/librispeech_asr.OTHER_memory.EN.test.seg.aligned"]:
+                #"data_filtered_test/yodas_memory.EN.test.seg.aligned"]:
+                "data_filtered_test/yodas_filtered_memory.EN.test.seg.aligned"]:
     s = 0
 
     lines = open(segfile).readlines()

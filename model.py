@@ -326,6 +326,40 @@ class WhisperForConditionalGenerationMemoryWrapper(WhisperForConditionalGenerati
             #lm_logits_nomem = lm_logits_nomem - lm_logits_nomem.mean(-1,keepdim=True)
 
             lm_logits = torch.cat([lm_logits_nomem,lm_logits_mem],-1) # b x l_tgt x (n_vocab+n_mem)
+
+            """# --- If the argmax is a memory token, set all other memory logits to -inf (keep chosen one) ---
+            n_vocab = lm_logits_nomem.size(-1)
+            n_mem = lm_logits.size(-1) - n_vocab
+            # predicted indices (b x l_tgt)
+            pred = lm_logits.argmax(dim=-1)
+            # boolean mask where the predicted token is a memory token
+            mem_pred_mask = pred >= n_vocab
+
+            if mem_pred_mask.any():
+                # memory-choice index for each position (may be negative for non-mem positions)
+                mem_choice = (pred - n_vocab)
+                # work with a safe (clamped) index to avoid negative indexing during gather/scatter
+                safe_mem_choice = mem_choice.clamp(min=0).unsqueeze(-1)  # b x l_tgt x 1
+
+                # extract existing memory logits (b x l_tgt x n_mem)
+                mem_logits = lm_logits[..., n_vocab:]
+
+                # gather the chosen memory logit value at each position
+                chosen_vals = mem_logits.gather(-1, safe_mem_choice)  # b x l_tgt x 1
+
+                # build new memory logits initialized to -inf, then put chosen_vals back in
+                new_mem_logits = mem_logits.new_full(mem_logits.shape, float("-inf"))
+                new_mem_logits.scatter_(-1, safe_mem_choice, chosen_vals)
+
+                # only replace memory logits at positions where the predicted token is a memory token
+                mem_pred_mask_unsq = mem_pred_mask.unsqueeze(-1)  # b x l_tgt x 1
+                mem_logits = torch.where(mem_pred_mask_unsq, new_mem_logits, mem_logits)
+
+                # write back into lm_logits
+                lm_logits[..., n_vocab:] = mem_logits"""
+            #else:
+            #    # no memory tokens predicted anywhere: set all memory logits to -inf
+            #    lm_logits[..., n_vocab:] = float("-inf")"""
         else:
             lm_logits = self.proj_out(outputs[0]) # b x l_tgt x n_vocab
 
@@ -398,8 +432,8 @@ class WhisperForConditionalGenerationMemory(nn.Module):
             config = model.config
             model = WhisperForConditionalGenerationMemoryWrapper(config)
             model.load_state_dict(state_dict, strict=False)
-            state_dict = torch.load("saves/model_newwords15/checkpoint-184000/encoder_memory.pt")
-            model.model.encoder_memory.load_state_dict(state_dict, strict=False)
+            #state_dict = torch.load("saves/model_newwords15/checkpoint-184000/encoder_memory.pt")
+            #model.model.encoder_memory.load_state_dict(state_dict, strict=False)
         else:
             return WhisperForConditionalGenerationMemoryWrapper.from_pretrained(model_name, torch_dtype=torch_dtype, device_map=device_map)
         return model

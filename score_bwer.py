@@ -12,6 +12,9 @@ import logging
 import json
 from data_filtered_test.create_memory_testset import replace_except_specified_chars
 
+import numpy as np
+from tqdm import tqdm
+
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
 logger.addHandler(logging.StreamHandler())
@@ -214,8 +217,23 @@ class EditDistance(object):
 def tag(ref_words, biasing_words):
     return [w if w not in biasing_words else f"<tag {w}>" for w in ref_words]
 
+def compute_bwer(utterances):
+    total_errors = sum(u['biased_errors'] for u in utterances)
+    total_refs = sum(u['biased_ref_words'] for u in utterances)
+    return total_errors / total_refs
+
+def bootstrap_ci(utterances, n_bootstrap=10000, alpha=0.05):
+    bwers = []
+    for _ in range(n_bootstrap):
+        sample = np.random.choice(utterances, len(utterances), replace=True)
+        bwers.append(compute_bwer(sample))
+    lower = np.percentile(bwers, 100 * alpha/2)
+    upper = np.percentile(bwers, 100 * (1 - alpha/2))
+    return lower, upper
+
 def main(args):
     refs = {}
+    biasing_words_ = set(line.strip() for line in open(args.biasing_list))
     with open(args.refs, "r") as f:
         for line in f:
             ary = line.strip().split("\t")
@@ -223,7 +241,7 @@ def main(args):
             if len(ary) >= 3:
                 biasing_words = set(json.loads(ary[2]))
             else:
-                biasing_words = set(line.strip() for line in open(args.biasing_list))
+                biasing_words = biasing_words_
             refs[uttid] = {"text": ref, "biasing_words": biasing_words}
     #logger.info("Loaded %d reference utts from %s", len(refs), args.refs)
 
@@ -252,18 +270,21 @@ def main(args):
     u_wer = WordError()
     b_wer = WordError()
 
-    references = []
-    hypotheses = []
+    #references = []
+    #hypotheses = []
 
     #sub = 0
     #total = 0
 
-    all_biasing_words_ordered = [line.strip().split("|") for line in open(args.biasing_list.replace("all",""))]
+    errors = []
 
+    #all_biasing_words_ordered = [line.strip().split("|") for line in open(args.biasing_list.replace("all",""))]
+
+    #for uttid in tqdm(refs):
     for uttid in refs:
         if uttid not in hyps:
             continue
-        current_biasing_words = all_biasing_words_ordered[len(references)]
+        #current_biasing_words = all_biasing_words_ordered[len(references)]
         if not args.lowercase:
             ref_tokens = replace_except_specified_chars(refs[uttid]["text"]).split()
             biasing_words = refs[uttid]["biasing_words"]
@@ -271,13 +292,17 @@ def main(args):
         else:
             ref_tokens = [w.lower() for w in replace_except_specified_chars(refs[uttid]["text"]).split()]
             biasing_words = set(w.lower() for w in refs[uttid]["biasing_words"])
+            #biasing_words = set(w for b in biasing_words for w in b.split())
             hyp_tokens = [w.lower() for w in replace_except_specified_chars(hyps[uttid]).split()]
-            current_biasing_words = [w.lower() for w in current_biasing_words]
+            #current_biasing_words = [w.lower() for w in current_biasing_words]
 
-        references.append(" ".join(tag(ref_tokens,current_biasing_words)))
-        hypotheses.append(hyp_tokens) #" ".join(hyp_tokens))
+        #references.append(" ".join(tag(ref_tokens,current_biasing_words)))
+        #hypotheses.append(hyp_tokens) #" ".join(hyp_tokens))
         ed = EditDistance()
         result = ed.align(ref_tokens, hyp_tokens)
+
+        #errors.append({"biased_errors": 0, "biased_ref_words": 0})
+
         for code, ref_idx, hyp_idx in zip(result.codes, result.refs, result.hyps):
             #if ref_tokens[ref_idx] in biasing_words and code != Code.match:
                 #if code in [Code.insertion,Code.substitution]:
@@ -288,6 +313,7 @@ def main(args):
                 wer.ref_words += 1
                 if ref_tokens[ref_idx] in biasing_words:
                     b_wer.ref_words += 1
+                    #errors[-1]["biased_ref_words"] += 1
                 else:
                     u_wer.ref_words += 1
             elif code == Code.substitution:
@@ -295,7 +321,10 @@ def main(args):
                 wer.errors[Code.substitution] += 1
                 if ref_tokens[ref_idx] in biasing_words:
                     b_wer.ref_words += 1
+                    #errors[-1]["biased_ref_words"] += 1
                     b_wer.errors[Code.substitution] += 1
+                    #errors[-1]["biased_errors"] += 1
+                    #print(ref_tokens[ref_idx])
                 else:
                     u_wer.ref_words += 1
                     u_wer.errors[Code.substitution] += 1
@@ -304,7 +333,9 @@ def main(args):
                 wer.errors[Code.deletion] += 1
                 if ref_tokens[ref_idx] in biasing_words:
                     b_wer.ref_words += 1
+                    #errors[-1]["biased_ref_words"] += 1
                     b_wer.errors[Code.deletion] += 1
+                    #errors[-1]["biased_errors"] += 1
                 else:
                     u_wer.ref_words += 1
                     u_wer.errors[Code.deletion] += 1
@@ -312,6 +343,8 @@ def main(args):
                 wer.errors[Code.insertion] += 1
                 if hyp_tokens[hyp_idx] in biasing_words:
                     b_wer.errors[Code.insertion] += 1
+                    #errors[-1]["biased_errors"] += 1
+                    #print(hyp_tokens[hyp_idx])
                 else:
                     u_wer.errors[Code.insertion] += 1
 
@@ -320,11 +353,19 @@ def main(args):
     print(f"U-WER: {u_wer.get_result_string()}")
     print(f"B-WER: {b_wer.get_result_string()}")
 
-    tp = 0
+    """import torch
+    torch.save(errors,"replacementlists_p_val2.pt")
+
+    lower, upper = bootstrap_ci(errors)
+    half_width = 100 * (upper - lower) / 2
+
+    print(f"CI: {half_width:.2f}")"""
+
+    """tp = 0
     fp = 0
     fn = 0
     for r,h in zip(references,hypotheses):
-        for match in re.findall(r"<tag (\w+)>", r):
+        for match in re.findall(r"<tag (w+)>", r):
             if match in h:
                 tp += 1
             else:
@@ -347,7 +388,7 @@ def main(args):
 
     #print(sub,total,sub/total)
 
-    hypotheses = [" ".join(h) for h in hypotheses]
+    hypotheses = [" ".join(h) for h in hypotheses]"""
 
     """import sys
     sys.path.append("PIER-CodeSwitching-Evaluation/jiwer/")

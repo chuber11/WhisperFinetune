@@ -13,8 +13,8 @@ from model import WhisperForConditionalGenerationConfidence
 from transformers import WhisperProcessor
 import torch
 
-def load_model(model_name="openai/whisper-tiny"):
-    model_name2 = "saves/model_confidence_tiny/checkpoint-8500/full"
+def load_model(model_name="openai/whisper-large-v2"):
+    model_name2 = "saves/model_confidence_large-v2-cont/checkpoint-8000/full"
     model = WhisperForConditionalGenerationConfidence.from_pretrained(model_name2, torch_dtype="auto", device_map="cuda")
 
     processor = WhisperProcessor.from_pretrained(model_name)

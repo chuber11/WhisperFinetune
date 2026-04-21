@@ -85,16 +85,17 @@ if args.use_memory:
                 memory_words = memory_words2
             print(memory_words)
             memory = processor.tokenizer(memory_words, return_tensors="pt", padding=True)
-            memory["input_ids"] = memory["input_ids"][:,4:].cuda()
-            memory["attention_mask"] = memory["attention_mask"][:,4:].cuda()
+            while any(memory["input_ids"][0,0]==t for t in [50259, 50359, 50258, 50363, 50261, 50260]):
+                memory["input_ids"] = memory["input_ids"][:,1:].cuda()
+                memory["attention_mask"] = memory["attention_mask"][:,1:].cuda()
             memory["double"] = double
             memory["add_score"] = args.force_exact_memory
             return memory
 
-        if not "data_filtered_test" in args.memory_file:
+        if not "data_filtered_test" in args.memory_file and not "data_test_enes" in args.memory_file:
             memory_words = [line.strip() for line in open(args.memory_file)]
-            memory = list_to_tensor(memory_words)
-            print("MEMORY",memory_words)
+            memory = list_to_tensor(memory_words) if memory_words else None
+            #print("MEMORY",memory_words)
         else: # for B-WER testing
             f1 = open(args.memory_file.replace("all",""))
             f2 = open(args.memory_file.replace("allwords","seg.aligned"))
@@ -146,7 +147,7 @@ for i in tqdm(range(0,len(dataset),batch_size)):
     data = data_collator([dataset[j] for j in range(i,min(len(dataset),i+batch_size))],inference=False)
     ids = data.pop("ids")
 
-    #if not "7902-96595-0000" in ids:
+    #if not "tw_6ufX9mDQ_000205574_000234201_eng_asr" in ids:
     #    continue
 
     with torch.no_grad():
@@ -161,14 +162,15 @@ for i in tqdm(range(0,len(dataset),batch_size)):
                     for word in words:
                         if num >= abs(args.memory_num_distractors):
                             break
-                        if word not in memory_words:
+                        if word not in memory_words and not "->" in word:
                             memory_words.append(word)
                             num += 1
                     if num >= abs(args.memory_num_distractors):
                         break
             if args.memory_num_distractors < 0:
                 memory_words = memory_words[l_mem:]
-            memory_ = list_to_tensor(memory_words) if memory_words else None
+
+            memory_ = list_to_tensor(memory_words) if memory_words and memory_words[0] else None
 
         text_convert = False
 
@@ -207,21 +209,34 @@ for i in tqdm(range(0,len(dataset),batch_size)):
             input_features = data["input_features"].cuda()
             model.generation_config.suppress_tokens = [t for t in model.generation_config.suppress_tokens if t!=25] # allow for : to be decoded
             kwargs = {}
-            if args.use_memory:
-                kwargs["first_memory_id"] = data["first_memory_id"]
+            if memory:
+                kwargs["first_memory_id"] = tokenizer("<|memory_0|>")["input_ids"][-2]
             transcript = model.generate(input_features, forced_decoder_ids=forced_decoder_ids, no_repeat_ngram_size=6, num_beams=args.num_beams, memory=memory_, **kwargs)
             transcript = tokenizer.batch_decode(transcript, skip_special_tokens=True)
 
-            memory_map = {str(i):prefix+(w if not "->" in w else w.split("->")[1]) for i,w in enumerate(memory_words)}
-            pattern = r"<\|memory_(\d+)\|>"
-            def replacer(match):
-                key = match.group(1)  # the number inside memory_{i}
-                return memory_map.get(key, f"<missing:{key}>")
+            if memory:
+                memory_map = {str(i):prefix+(w if not "->" in w else w.split("->")[1]) for i,w in enumerate(memory_words)}
+                pattern = r"<\|memory_(\d+)\|>"
+                def replacer(match):
+                    key = match.group(1)  # the number inside memory_{i}
+                    return memory_map.get(key, f"<missing:{key}>")
 
-            transcript = [re.sub(pattern, replacer, t) for t in transcript]
+                transcript = [re.sub(pattern, replacer, t) for t in transcript]
+
+                for w in memory_words: # remove halluzinated memory tokens
+                    if "->" in w:
+                        w = w.split("->")[1]
+                    while True:
+                        l = sum(len(t) for t in transcript)
+                        transcript = [re.sub(prefix+w+prefix+w, prefix+w, t) for t in transcript]
+                        l2 = sum(len(t) for t in transcript)
+                        if l == l2:
+                            break
         else:
             #given_hypofile = args.hypo_file.replace("replacements_text_filtered_other.","").replace("replacements_text_filtered.","")
-            given_hypofile = args.hypo_file.replace("replacements_text_other.","").replace("oracle_text.","").replace("replacements_other_plus_text.","replacements_other.")
+            given_hypofile = args.hypo_file.replace("replacements_text_other.","").replace("oracle_text.","") \
+                .replace("replacements_other_plus_text_logminf.","replacements_other_logminf.").replace("replacements_other_plus_text.","replacements_other.")
+            #given_hypofile = "hypos_memory/saves_model_newwords18_3_checkpoint-128000.EN.data_filtered_test_yodas_filtered_memory.EN.test.allwords.100.0.hyp"
 
             given_hypos = {words[0]:" ".join(words[1:]) for line in open(given_hypofile) if (words := line.strip().split())}
             transcript = [given_hypos[i] for i in ids]

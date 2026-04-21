@@ -184,6 +184,7 @@ parser.add_argument('--greater_is_better', action="store_true", help='If higher 
 parser.add_argument('--only_train_embedding', action="store_true", help='Freeze all weights except the projection layer / embedding layer')
 parser.add_argument('--train_embedding', action="store_true", help='Train embedding / proj layer weights')
 parser.add_argument('--freeze_encoder', action="store_true", help='Freeze the encoder parameters')
+parser.add_argument('--adapt_loaded_adapter', action="store_true")
 
 args = parser.parse_args()
 #args.model_name = "openai/whisper-tiny"
@@ -260,10 +261,11 @@ else:
                 print(files)
                 raise RuntimeError
             load_adapter = args.load
-            args.load = json.load(open(files[0]))["base_model_name_or_path"]
-        elif len(files) != 1:
+            checkpoint = json.load(open(files[0]))["base_model_name_or_path"]
+        elif len(files) == 1:
+            checkpoint = "/".join(files[0].split("/")[:-1])
+        else:
             breakpoint()
-        checkpoint = "/".join(files[0].split("/")[:-1])
         print("Loading checkpoint from",checkpoint)
         model = model_class.from_pretrained(checkpoint, torch_dtype="auto", device_map="cuda")
 
@@ -278,12 +280,23 @@ if load_adapter is not None:
         print(files)
         raise RuntimeError
     model = PeftModel.from_pretrained(model, files[0])
-    model = model.merge_and_unload()
+    if not args.adapt_loaded_adapter:
+        model = model.merge_and_unload()
     print("Loaded adapter from",files[0])
+
+"""path = "saves/model_newwords18_2/checkpoint-94000"
+model_ = model_class.from_pretrained(path, torch_dtype="auto", device_map="cuda")
+filtered_state_dict = {
+    k: v for k, v in model_.state_dict().items()
+    if k in model.state_dict() and v.shape == model.state_dict()[k].shape
+}
+print(len(filtered_state_dict), len(model_.state_dict()), len(model.state_dict())-len(filtered_state_dict))
+model.load_state_dict(filtered_state_dict, strict=False)
+del model_"""
 
 factorization = possible_factorization and args.factorization_rank > 0
 
-if factorization:
+if factorization and not args.adapt_loaded_adapter:
     model = add_lora(model, args.factorization_rank, args.factorization_only_decoder)
 
 if args.only_train_embedding:
