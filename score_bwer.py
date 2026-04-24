@@ -52,7 +52,7 @@ class WordError(object):
 
     def get_result_string(self):
         return (
-            f"error_rate={self.get_wer():.1f}, "
+            f"error_rate={self.get_wer():.2f}, "
             f"ref_words={self.ref_words}, "
             f"subs={self.errors[Code.substitution]}, "
             f"ins={self.errors[Code.insertion]}, "

@@ -140,18 +140,22 @@ for i in tqdm(range(0,len(dataset),batch_size)):
             memory_ = memory
         else:
             memory_words = memory(ids)
-            if args.memory_num_distractors > 0:
+            l_mem = len(memory_words)
+            if args.memory_num_distractors not in [0,-1]:
                 num = 0
                 for _,words in new_words:
                     for word in words:
-                        if num >= args.memory_num_distractors:
+                        if num >= abs(args.memory_num_distractors):
                             break
-                        if prefix+word not in memory_words:
+                        if word not in memory_words and not "->" in word:
                             memory_words.append(word)
                             num += 1
-                    if num >= args.memory_num_distractors:
+                    if num >= abs(args.memory_num_distractors):
                         break
-            memory_ = list_to_tensor(memory_words)
+            if args.memory_num_distractors < 0:
+                memory_words = memory_words[l_mem:]
+
+            memory_ = list_to_tensor(memory_words) if memory_words and memory_words[0] else None
 
         text_convert = False
 
@@ -182,6 +186,7 @@ for i in tqdm(range(0,len(dataset),batch_size)):
             outputs.append(id+" "+t+"\n")
         else:
             f.write(id+" "+t+"\n")
+        f.flush()
 
 if not args.no_write_at_end:
     with open(outputfile, "w") as f:
