@@ -45,7 +45,7 @@ def get_prompt(audio_path: str, memory_words):
 def transcribe(conversations):
     #conda deactivate
     #conda activate qwen3-asr
-    #qwen-asr-serve Qwen/Qwen3-ASR-1.7B --gpu-memory-utilization 0.9 --host 0.0.0.0 --port 7680
+    #qwen-asr-serve Qwen/Qwen3-ASR-1.7B --gpu-memory-utilization 0.9 --host 0.0.0.0 --port 7681
     #vllm serve Qwen/Qwen3-Omni-30B-A3B-Instruct --port 7680 --tensor-parallel-size 2
 
     if model == "qwen3asr":
@@ -75,6 +75,9 @@ def transcribe(conversations):
         elif model == "qwen3omni":
             text = content
 
+            if "\n" in text:
+                print("ERROR: newline in output!")
+                text = text.replace("\n"," ")
         return text
 
     results = []
@@ -100,6 +103,8 @@ if n2 == 0:
     separation = ", "
 elif n2 == 1:
     separation = " "
+elif n2 == 2:
+    separation = ", "
 
 for set_ in ["earnings","librispeech_asr.CLEAN","librispeech_asr.OTHER","yodas"]:
     if "librispeech" in set_:
@@ -116,12 +121,16 @@ for set_ in ["earnings","librispeech_asr.CLEAN","librispeech_asr.OTHER","yodas"]
 
     for distractors in [0,10,100,250,-250,-100,-10,-1]:
         if model == "qwen3asr":
-            if separation == ", ":
+            if n2 == 2:
+                outfile = f"hypos_memory_diss/saves_model_qwen3asr1p7B_random3.EN.data_filtered_test_{set_}_memory.EN.test.allwords.{distractors}.0.hyp"
+            elif separation == ", ":
                 outfile = f"hypos_memory_diss/saves_model_qwen3asr1p7B_random.EN.data_filtered_test_{set_}_memory.EN.test.allwords.{distractors}.0.hyp"
             else:
                 outfile = f"hypos_memory_diss/saves_model_qwen3asr1p7B_random2.EN.data_filtered_test_{set_}_memory.EN.test.allwords.{distractors}.0.hyp"
         elif model == "qwen3omni":
-            if separation == ", ":
+            if n2 == 2:
+                outfile = f"hypos_memory_diss/saves_model_qwen3omni30B_random3.EN.data_filtered_test_{set_}_memory.EN.test.allwords.{distractors}.0.hyp"
+            elif separation == ", ":
                 outfile = f"hypos_memory_diss/saves_model_qwen3omni30B_random.EN.data_filtered_test_{set_}_memory.EN.test.allwords.{distractors}.0.hyp"
             else:
                 outfile = f"hypos_memory_diss/saves_model_qwen3omni30B_random2.EN.data_filtered_test_{set_}_memory.EN.test.allwords.{distractors}.0.hyp"
@@ -155,7 +164,10 @@ for set_ in ["earnings","librispeech_asr.CLEAN","librispeech_asr.OTHER","yodas"]
                         break
             if distractors < 0:
                 memory_words = memory_words[l_mem:]
-            random.shuffle(memory_words)
+            if n2 != 2:
+                random.shuffle(memory_words)
+            else:
+                memory_words = sorted(memory_words)
 
             conversation = get_prompt(audio_path, memory_words)
             data.append((id, conversation))
